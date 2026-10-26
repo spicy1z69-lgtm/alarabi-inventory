@@ -14,7 +14,8 @@
     "react": "latest",
     "react-dom": "latest",
     "lucide-react": "latest",
-    "@supabase/supabase-js": "^2.57.0"
+    "@supabase/supabase-js": "^2.57.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "typescript": "latest",
