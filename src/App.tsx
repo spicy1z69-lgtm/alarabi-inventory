@@ -97,7 +97,7 @@ const load = <T,>(key: string, fallback: T): T => {
   }
 }
 
-type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string }
+type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string }
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string }
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash'
 
@@ -540,8 +540,11 @@ function InventoryApp({ user }: { user: User }) {
       })),
       ...old,
     ])
+    const linkedPayments = cashEntries.filter(entry => entry.invoiceId === invoice.id)
+    if (linkedPayments.length && !window.confirm('الفاتورة مرتبطة بتحصيلات مسجلة بالخزنة بقيمة ' + money(linkedPayments.reduce((sum, entry) => sum + entry.amount, 0)) + '. حذفها سيحذف التحصيلات المرتبطة أيضًا. هل تريد المتابعة؟')) return
+    if (linkedPayments.length) setCashEntries(old => old.filter(entry => entry.invoiceId !== invoice.id))
     setInvoices(old => old.filter(item => item.id !== invoice.id))
-    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون')
+    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون' + (linkedPayments.length ? ' وحذف التحصيلات المرتبطة بها' : ''))
   }
 
   const deleteQuote = (quote: Quote) => {
@@ -562,12 +565,36 @@ function InventoryApp({ user }: { user: User }) {
     printWindow.print()
   }
 
+  const recordInvoicePayment = (invoice: Invoice) => {
+    const total = invoiceTotalFor(invoice)
+    const balance = Math.max(0, total - Math.max(0, invoice.paidAmount || 0))
+    if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
+    const rawAmount = window.prompt('المتبقي على الفاتورة ' + money(balance) + '. اكتب مبلغ التحصيل:')
+    if (rawAmount === null) return
+    const amount = Number(rawAmount)
+    if (!Number.isFinite(amount) || amount <= 0) { setNotice('اكتب مبلغ تحصيل صحيحًا أكبر من صفر'); return }
+    if (amount > balance) { setNotice('مبلغ التحصيل أكبر من المتبقي على الفاتورة'); return }
+    const payment = { id: crypto.randomUUID(), kind: 'in' as const, amount, category: 'تحصيل فاتورة', note: 'تحصيل ' + invoice.number + ' — ' + invoice.customer, date: today(), invoiceId: invoice.id }
+    setCashEntries(old => [payment, ...old])
+    setInvoices(old => old.map(item => {
+      if (item.id !== invoice.id) return item
+      const paidAmount = Math.min(total, Math.max(0, item.paidAmount || 0) + amount)
+      return { ...item, paidAmount, status: paidAmount >= total ? 'paid' : 'partial' }
+    }))
+    setNotice('تم تسجيل التحصيل وتحديث الفاتورة والخزنة معًا')
+  }
+
   const updateInvoiceStatus = (invoice: Invoice, status: Invoice['status']) => {
-    const paidAmount = status === 'paid'
-      ? invoiceTotalFor(invoice)
-      : status === 'unpaid' ? 0 : invoice.paidAmount
+    if (status === 'paid') {
+      recordInvoicePayment(invoice)
+      return
+    }
+    if (status === 'unpaid' && (invoice.paidAmount || 0) > 0) {
+      setNotice('لا يمكن إلغاء السداد مباشرة بعد تسجيل التحصيل؛ راجع حركات الخزنة وسجّل رد المبلغ كحركة خارجة عند الحاجة.')
+      return
+    }
     setInvoices(old => old.map(item => item.id === invoice.id
-      ? {...item, status, paidAmount: Math.min(invoiceTotalFor(item), paidAmount)}
+      ? {...item, status, paidAmount: status === 'unpaid' ? 0 : Math.min(invoiceTotalFor(item), item.paidAmount || 0)}
       : item))
   }
 
@@ -925,7 +952,7 @@ function InventoryApp({ user }: { user: User }) {
               <Stat icon={<ClipboardList />} label="عدد الحركات" value={String(cashEntries.length)} foot="حركة مالية مسجلة" />
             </section>
             <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
-            {cashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{cashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td><button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
+            {cashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{cashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1082,8 +1109,8 @@ function InventoryApp({ user }: { user: User }) {
                     <td><span className={inv.status === 'paid' ? 'pill success' : 'pill danger'}>{inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
                     <td className="actions">
                       <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
+                      {inv.status !== 'paid' && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
                       <button className="icon-btn delete" aria-label="حذف الفاتورة" title="حذف الفاتورة" onClick={() => deleteInvoice(inv)}><Trash2 size={16} /></button>
-                      <button className="secondary-btn invoice-status-btn" onClick={() => updateInvoiceStatus(inv, inv.status === 'paid' ? 'unpaid' : 'paid')}>{inv.status === 'paid' ? 'إلغاء السداد' : 'تسجيل مدفوعة'}</button>
                     </td>
                   </tr>
                 })}</tbody>
