@@ -1680,3 +1680,128 @@ button:focus-visible, input:focus-visible { outline-color: #a9d8bd; }
 @media (max-width: 700px) {
   .sidebar { background: linear-gradient(135deg, #172a25, #203d33); }
 }
+
+
+/* Crimson + black industrial theme */
+:root {
+  color-scheme: dark;
+  --brand-navy: #0b0b0d;
+  --brand-blue: #e11d2e;
+  --brand-blue-dark: #b51220;
+  --surface: #151518;
+  --line: #303035;
+  --muted: #a1a1aa;
+  color: #f4f4f5;
+  background: #0b0b0d;
+}
+body {
+  color: #f4f4f5;
+  background:
+    radial-gradient(ellipse at 85% 0%, rgba(225,29,46,.12), transparent 32rem),
+    #0b0b0d;
+}
+.sidebar {
+  background: linear-gradient(180deg, #080809 0%, #171719 100%);
+  box-shadow: 8px 0 30px rgba(0,0,0,.28);
+  border-inline-end: 1px solid #29292e;
+}
+.brand-mark {
+  background: linear-gradient(135deg, #ff3344, #b51220);
+  box-shadow: 0 8px 22px rgba(225,29,46,.26);
+}
+.brand-name span { color: #ff6874; }
+.brand-caption, .sidebar-foot small { color: #888891; }
+.nav-item { color: #b6b6be; }
+.nav-item:hover, .nav-item.active {
+  background: linear-gradient(100deg, rgba(225,29,46,.22), rgba(225,29,46,.07));
+  border-color: rgba(255,104,116,.18);
+  box-shadow: inset -3px 0 #f04452;
+  color: #fff;
+}
+.main { color: #f4f4f5; }
+.eyebrow { color: #a1a1aa; }
+.today-chip {
+  border-color: #303035;
+  background: #171719;
+  color: #c4c4cc;
+  box-shadow: 0 4px 14px rgba(0,0,0,.14);
+}
+.welcome {
+  background: linear-gradient(115deg, #09090b 0%, #211014 60%, #54131b 100%);
+  border: 1px solid #3b2024;
+  box-shadow: 0 16px 36px rgba(0,0,0,.24);
+}
+.welcome-label, .welcome-art { color: #ff929a; }
+.welcome-art { border-color: rgba(255,146,154,.25); }
+.welcome p { color: #d4c8ca; }
+.stat-card, .panel {
+  border-color: #2d2d33;
+  background: #151518;
+  color: #f4f4f5;
+  box-shadow: 0 6px 20px rgba(0,0,0,.16);
+}
+.stat-icon, .quote-icon {
+  background: #35171b;
+  color: #ff5360;
+}
+.stat-icon.warning { background: #332315; color: #f0ad4e; }
+.stat-label { color: #a1a1aa; }
+.stat-card small, .muted { color: #85858f; }
+.panel-head p { color: #9999a3; }
+.primary-btn {
+  border-color: #e11d2e;
+  background: linear-gradient(135deg, #f02b3b, #b51220);
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(225,29,46,.16);
+}
+.primary-btn:hover {
+  background: #a90f1d;
+  box-shadow: 0 7px 18px rgba(225,29,46,.22);
+}
+.secondary-btn {
+  border-color: #393940;
+  background: #202024;
+  color: #e4e4e7;
+}
+.text-button { color: #ff5360; }
+th { background: #202024; color: #b0b0b9; }
+td { border-bottom-color: #29292f; color: #c1c1c9; }
+.product-cell { color: #f4f4f5; }
+td code { background: #25252b; color: #d4d4db; }
+.searchbox { border-color: #393940; background: #171719; color: #a1a1aa; }
+.searchbox input { color: #f4f4f5; }
+.icon-btn { border-color: #35353b; background: #1b1b1f; color: #c4c4cc; }
+.icon-btn:hover { background: #2a2023; }
+.icon-btn.delete { color: #ff5a65; }
+.pick-row { border-bottom-color: #2c2c32; background: #151518; color: #ff5360; }
+.pick-row span { color: #f4f4f5; }
+.quote-list-row { border-bottom-color: #2c2c32; }
+.empty-state { color: #9696a0; }
+.empty-state b { color: #dedee3; }
+.empty-icon { background: #242429; color: #aaaab4; }
+.notice { border-color: #285b3c; background: #13271b; color: #8fe0a9; }
+.modal-backdrop { background: rgba(0,0,0,.78); }
+.modal { border-color: #35353b; background: #171719; color: #f4f4f5; }
+.modal-head p, .pick-row small, .draft-row small { color: #9999a3; }
+.field > span { color: #d4d4db; }
+.field input {
+  border-color: #393940;
+  background: #202024;
+  color: #f4f4f5;
+}
+.field input:focus {
+  border-color: #e11d2e;
+  box-shadow: 0 0 0 3px rgba(225,29,46,.16);
+}
+.quote-draft { background: #202024; }
+.draft-row { border-bottom-color: #38383f; }
+.draft-row input { border-color: #393940; background: #171719; color: #f4f4f5; }
+.footer { color: #85858f; }
+.pill.success { background: #143522; color: #8fe0a9; }
+.pill.danger { background: #3b171b; color: #ff858d; }
+button:focus-visible, input:focus-visible { outline-color: #ff6874; }
+.pick-products h4, .quote-draft h4 { color: #f4f4f5; }
+.total-row { color: #fff; }
+@media (max-width: 700px) {
+  .sidebar { background: linear-gradient(135deg, #080809, #171719); }
+}
