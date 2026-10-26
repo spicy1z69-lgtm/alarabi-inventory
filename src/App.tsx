@@ -82,7 +82,11 @@ const money = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n)
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => {
+  const now = new Date()
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 10)
+}
 
 const load = <T,>(key: string, fallback: T): T => {
   try {
@@ -281,12 +285,20 @@ function InventoryApp({ user }: { user: User }) {
   const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
   const unpaidInvoices = invoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
   const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
-  const knownCostSales = invoices.reduce((sum, invoice) => sum + (invoice.items || []).reduce((itemSum, item) => {
-    const product = products.find(p => p.id === item.productId)
-    return itemSum + item.quantity * (item.costPrice ?? product?.costPrice ?? 0)
-  }, 0), 0)
-  const hasMissingCosts = products.some(p => !(p.costPrice && p.costPrice > 0))
-  const estimatedGrossProfit = totalInvoiceSales - knownCostSales
+  // Only use cost snapshots stored on invoice lines. Falling back to today's
+  // product cost would rewrite historical margins whenever a product is edited.
+  const costCompleteInvoices = invoices.filter(invoice =>
+    (invoice.items || []).every(item => typeof item.costPrice === 'number' && item.costPrice > 0)
+  )
+  const knownCostSales = costCompleteInvoices.reduce((sum, invoice) =>
+    sum + invoice.items.reduce((itemSum, item) => itemSum + item.quantity * (item.costPrice ?? 0), 0), 0)
+  const hasMissingCosts = costCompleteInvoices.length !== invoices.length
+  const knownSalesBeforeTax = costCompleteInvoices.reduce((sum, invoice) => {
+    const subtotal = invoice.items.reduce((itemSum, item) => itemSum + item.quantity * item.price, 0)
+    const discount = Math.min(subtotal, Math.max(0, invoice.discount || 0))
+    return sum + Math.max(0, subtotal - discount)
+  }, 0)
+  const estimatedGrossProfit = knownSalesBeforeTax - knownCostSales
 
   const filtered = useMemo(
     () =>
@@ -439,6 +451,14 @@ function InventoryApp({ user }: { user: User }) {
     }
     if (invoiceDiscountValue > invoiceSubtotal) {
       setNotice('الخصم لا يمكن أن يكون أكبر من قيمة الأصناف')
+      return
+    }
+    if (!Number.isFinite(invoiceTaxValue) || invoiceTaxValue < 0 || invoiceTaxValue > 100) {
+      setNotice('نسبة الضريبة يجب أن تكون بين 0 و100')
+      return
+    }
+    if (!Number.isFinite(Number(invoicePaid)) || Number(invoicePaid) < 0) {
+      setNotice('المبلغ المدفوع يجب ألا يكون سالبًا')
       return
     }
 
@@ -700,8 +720,8 @@ function InventoryApp({ user }: { user: User }) {
               <Stat icon={<CircleDollarSign />} label="المبالغ المحصلة" value={money(totalCollected)} foot={paidInvoiceCount + ' فاتورة مسددة بالكامل'} />
               <Stat icon={<AlertTriangle />} label="مستحقات العملاء" value={money(customerBalances)} foot={unpaidInvoices.length + ' فاتورة عليها رصيد'} warning={customerBalances > 0} />
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
-              <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? 'غير مكتملة: أدخل تكلفة شراء كل صنف' : 'حسب تكلفة الشراء المسجلة'} warning={hasMissingCosts} />
-              <Stat icon={<CircleDollarSign />} label="هامش إجمالي تقديري" value={money(estimatedGrossProfit)} foot={hasMissingCosts ? 'غير نهائي لوجود أصناف بلا تكلفة شراء' : 'المبيعات ناقص تكلفة البضاعة فقط'} warning={hasMissingCosts} />
+              <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? `بيانات مكتملة لـ ${costCompleteInvoices.length} من ${invoices.length} فاتورة` : 'حسب تكلفة الشراء المحفوظة بالفواتير'} warning={hasMissingCosts} />
+              <Stat icon={<CircleDollarSign />} label="هامش إجمالي تقديري" value={money(estimatedGrossProfit)} foot={hasMissingCosts ? 'تقدير للفواتير المكتملة فقط، قبل المصروفات والضرائب' : 'المبيعات بعد الخصم وقبل الضريبة ناقص التكلفة'} warning={hasMissingCosts} />
             </section>
 
             <section className="panel">
