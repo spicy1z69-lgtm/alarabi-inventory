@@ -143,6 +143,12 @@ function InventoryApp({ user }: { user: User }) {
     costPrice: '0',
     minStock: '2',
   })
+  const [stockMovementModal, setStockMovementModal] = useState(false)
+  const [movementProductId, setMovementProductId] = useState('')
+  const [movementKind, setMovementKind] = useState<'in' | 'out'>('in')
+  const [movementQuantity, setMovementQuantity] = useState('')
+  const [movementReason, setMovementReason] = useState('')
+  const [movementReference, setMovementReference] = useState('')
 
   useEffect(() => {
     let active = true
@@ -367,37 +373,39 @@ function InventoryApp({ user }: { user: User }) {
 
   const recordStockMovement = () => {
     if (!products.length) { setNotice('أضف صنفًا أولًا'); return }
-    const code = window.prompt('اكتب كود الصنف المراد تسجيل حركته:')
-    if (!code?.trim()) return
-    const product = products.find(item => item.code.toLowerCase() === code.trim().toLowerCase())
-    if (!product) { setNotice('لم يتم العثور على صنف بهذا الكود'); return }
-    const direction = window.prompt('نوع الحركة: اكتب دخول لإضافة كمية أو خروج لخصم كمية')
-    if (!direction) return
-    const normalized = direction.trim().toLowerCase()
-    const kind = ['دخول', 'دخول بضاعة', 'in', 'دخول'].includes(normalized) ? 'in' : ['خروج', 'صرف', 'out'].includes(normalized) ? 'out' : null
-    if (!kind) { setNotice('نوع الحركة غير صحيح. اكتب دخول أو خروج'); return }
-    const rawQuantity = window.prompt('اكتب الكمية:')
-    if (rawQuantity === null) return
-    const quantity = Number(rawQuantity)
+    setMovementProductId(products[0].id)
+    setMovementKind('in')
+    setMovementQuantity('')
+    setMovementReason('')
+    setMovementReference('')
+    setStockMovementModal(true)
+  }
+
+  const saveStockMovement = () => {
+    const product = products.find(item => item.id === movementProductId)
+    if (!product) { setNotice('اختار الصنف'); return }
+    const quantity = Number(movementQuantity)
     if (!Number.isFinite(quantity) || quantity <= 0) { setNotice('اكتب كمية أكبر من صفر'); return }
-    if (kind === 'out' && quantity > product.quantity) { setNotice('الكمية المطلوبة أكبر من الرصيد الحالي (' + product.quantity + ')'); return }
-    const reason = window.prompt('سبب الحركة (مثال: شراء بضاعة، صرف للمشروع):')?.trim()
-    if (!reason) { setNotice('اكتب سبب الحركة'); return }
-    const delta = kind === 'in' ? quantity : -quantity
+    if (movementKind === 'out' && quantity > product.quantity) {
+      setNotice('الكمية المطلوبة أكبر من الرصيد الحالي (' + product.quantity + ')')
+      return
+    }
+    if (!movementReason.trim()) { setNotice('اكتب سبب الحركة'); return }
+    const delta = movementKind === 'in' ? quantity : -quantity
     setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: item.quantity + delta } : item))
     setStockMovements(old => [{
       id: crypto.randomUUID(),
       productId: product.id,
       productName: product.name,
-      kind,
+      kind: movementKind,
       quantity,
-      reason,
-      reference: 'حركة يدوية',
+      reason: movementReason.trim(),
+      reference: movementReference.trim() || 'حركة يدوية',
       date: today(),
     }, ...old])
-    setNotice(kind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الرصيد' : 'تم تسجيل خروج البضاعة وتحديث الرصيد')
+    setStockMovementModal(false)
+    setNotice(movementKind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الرصيد' : 'تم تسجيل خروج البضاعة وتحديث الرصيد')
   }
-
   const addQuoteRow = (p: Product) => {
     setQuoteRows(old => {
       const existing = old.find(x => x.productId === p.id)
@@ -1182,6 +1190,40 @@ function InventoryApp({ user }: { user: User }) {
           </section>
         )}
       </main>
+
+      {stockMovementModal && (
+        <div className="modal-backdrop" onClick={() => setStockMovementModal(false)}>
+          <section className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div><h2>تسجيل حركة مخزون</h2><p>حدد الصنف ونوع الحركة لتحديث الرصيد وتسجيلها في السجل.</p></div>
+              <button className="icon-btn" onClick={() => setStockMovementModal(false)} aria-label="إغلاق"><X /></button>
+            </div>
+            <div className="form-grid">
+              <label className="field"><span>الصنف *</span>
+                <select value={movementProductId} onChange={e => setMovementProductId(e.target.value)}>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} (الرصيد: {p.quantity})</option>)}
+                </select>
+              </label>
+              <label className="field"><span>نوع الحركة *</span>
+                <select value={movementKind} onChange={e => setMovementKind(e.target.value as 'in' | 'out')}>
+                  <option value="in">دخول بضاعة — إضافة للرصيد</option>
+                  <option value="out">خروج بضاعة — خصم من الرصيد</option>
+                </select>
+              </label>
+              <Field label="الكمية *" type="number" value={movementQuantity} onChange={setMovementQuantity} placeholder="اكتب الكمية" />
+              <Field label="سبب الحركة *" value={movementReason} onChange={setMovementReason} placeholder="شراء بضاعة، صرف لمشروع..." />
+              <Field label="المرجع (اختياري)" value={movementReference} onChange={setMovementReference} placeholder="رقم إذن الصرف أو فاتورة الشراء" />
+            </div>
+            {products.find(p => p.id === movementProductId) && (
+              <p className="muted" style={{ marginTop: 12 }}>الرصيد الحالي: <strong>{products.find(p => p.id === movementProductId)?.quantity}</strong> — بعد الحركة: <strong>{(products.find(p => p.id === movementProductId)?.quantity ?? 0) + (movementKind === 'in' ? 1 : -1) * (Number(movementQuantity) > 0 ? Number(movementQuantity) : 0)}</strong></p>
+            )}
+            <div className="modal-actions">
+              <button className="secondary-btn" onClick={() => setStockMovementModal(false)}>إلغاء</button>
+              <button className="primary-btn" onClick={saveStockMovement}><Check size={17} /> حفظ الحركة</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {productModal && (
         <div
