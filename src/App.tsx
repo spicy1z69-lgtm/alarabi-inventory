@@ -430,9 +430,17 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const deleteInvoice = (invoice: Invoice) => {
-    if (!window.confirm(`متأكد إنك عايز تحذف الفاتورة ${invoice.number}؟ الحذف نهائي ومش هيرجع الكميات للمخزون تلقائيًا.`)) return
+    if (!window.confirm(`متأكد إنك عايز تحذف الفاتورة ${invoice.number}؟ سيتم حذفها وإرجاع كمياتها للمخزون.`)) return
+    const returned = new Map<string, number>()
+    for (const row of invoice.items || []) {
+      returned.set(row.productId, (returned.get(row.productId) || 0) + row.quantity)
+    }
+    setProducts(old => old.map(product => ({
+      ...product,
+      quantity: product.quantity + (returned.get(product.id) || 0),
+    })))
     setInvoices(old => old.filter(item => item.id !== invoice.id))
-    setNotice('تم حذف الفاتورة')
+    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون')
   }
 
   const deleteQuote = (quote: Quote) => {
