@@ -200,7 +200,7 @@ function InventoryApp({ user }: { user: User }) {
       company: COMPANY,
       exportedAt: new Date().toISOString(),
       version: 1,
-      data: { products, quotes, invoices, cashEntries },
+      data: { products, quotes, invoices, cashEntries, stockMovements },
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -224,17 +224,19 @@ function InventoryApp({ user }: { user: User }) {
         !Array.isArray(data.products) ||
         !Array.isArray(data.quotes) ||
         !Array.isArray(data.invoices) ||
-        !Array.isArray(data.cashEntries)
+        !Array.isArray(data.cashEntries) ||
+        (data.stockMovements !== undefined && !Array.isArray(data.stockMovements))
       ) {
         setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
         return
       }
-      const confirmed = window.confirm('تنبيه: استرجاع النسخة سيستبدل بيانات الأصناف وعروض الأسعار والفواتير والخزنة الحالية. هل حفظت نسخة من البيانات الحالية وتريد المتابعة؟')
+      const confirmed = window.confirm('تنبيه: استرجاع النسخة سيستبدل بيانات الأصناف وعروض الأسعار والفواتير والخزنة وحركات المخزون الحالية. هل حفظت نسخة من البيانات الحالية وتريد المتابعة؟')
       if (!confirmed) return
       setProducts(data.products)
       setQuotes(data.quotes)
       setInvoices(data.invoices)
       setCashEntries(data.cashEntries)
+      setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : [])
       setNotice('تم تحميل النسخة الاحتياطية. جاري حفظ البيانات')
     } catch {
       setNotice('تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح بصيغة JSON')
