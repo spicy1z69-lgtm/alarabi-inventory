@@ -2006,3 +2006,21 @@ input[type="email"], input[type="tel"], input[type="password"], select, textarea
   color: #f4f4f5 !important;
 }
 .topbar .eyebrow, .topbar small { color: #a1a1aa !important; }
+
+
+/* Ensure inventory table header cells use the dark palette */
+table thead, table thead tr, table thead th,
+.table-wrap thead th, .table-responsive thead th {
+  background: #202024 !important;
+  background-color: #202024 !important;
+  color: #f4f4f5 !important;
+  border-color: #393940 !important;
+}
+table tbody tr, table tbody td {
+  background-color: #151518;
+  color: #e4e4e7;
+  border-color: #303035 !important;
+}
+table tbody tr:hover, table tbody tr:hover td {
+  background-color: #202024 !important;
+}
