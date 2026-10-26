@@ -650,6 +650,37 @@ function InventoryApp({ user }: { user: User }) {
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
             </section>
 
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <h3>آخر حركات المخزون</h3>
+                  <p>سجل تلقائي لخصم الكميات عند إنشاء فاتورة وإرجاعها عند حذفها.</p>
+                </div>
+                <span className="muted">{stockMovements.length} حركة</span>
+              </div>
+              {stockMovements.length === 0 ? (
+                <div className="empty-state">لسه مفيش حركات مسجلة. هتظهر هنا حركات الفواتير الجديدة.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>التاريخ</th><th>الصنف</th><th>نوع الحركة</th><th>الكمية</th><th>السبب</th><th>المرجع</th></tr></thead>
+                    <tbody>
+                      {stockMovements.slice(0, 10).map(movement => (
+                        <tr key={movement.id}>
+                          <td>{movement.date}</td>
+                          <td className="product-cell">{movement.productName}</td>
+                          <td><span className={movement.kind === 'in' ? 'pill success' : 'pill danger'}>{movement.kind === 'in' ? 'دخول' : 'خروج'}</span></td>
+                          <td>{movement.quantity}</td>
+                          <td>{movement.reason}</td>
+                          <td><code>{movement.reference}</code></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
             <section className="panel backup-panel">
               <div className="panel-head">
                 <div>
