@@ -283,7 +283,7 @@ function InventoryApp({ user }: { user: User }) {
   const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
   const knownCostSales = invoices.reduce((sum, invoice) => sum + (invoice.items || []).reduce((itemSum, item) => {
     const product = products.find(p => p.id === item.productId)
-    return itemSum + item.quantity * (product?.costPrice ?? 0)
+    return itemSum + item.quantity * (item.costPrice ?? product?.costPrice ?? 0)
   }, 0), 0)
   const hasMissingCosts = products.some(p => !(p.costPrice && p.costPrice > 0))
   const estimatedGrossProfit = totalInvoiceSales - knownCostSales
@@ -404,6 +404,7 @@ function InventoryApp({ user }: { user: User }) {
               code: p.code,
               quantity: 1,
               price: p.price,
+              costPrice: p.costPrice ?? 0,
             },
           ]
     })
