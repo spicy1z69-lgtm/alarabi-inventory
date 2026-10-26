@@ -347,6 +347,18 @@ function InventoryApp({ user }: { user: User }) {
     setNotice('تم حفظ الفاتورة وخصم الكميات من المخزون بنجاح')
   }
 
+  const deleteInvoice = (invoice: Invoice) => {
+    if (!window.confirm(`متأكد إنك عايز تحذف الفاتورة ${invoice.number}؟ الحذف نهائي ومش هيرجع الكميات للمخزون تلقائيًا.`)) return
+    setInvoices(old => old.filter(item => item.id !== invoice.id))
+    setNotice('تم حذف الفاتورة')
+  }
+
+  const deleteQuote = (quote: Quote) => {
+    if (!window.confirm(`متأكد إنك عايز تحذف عرض السعر ${quote.number}؟`)) return
+    setQuotes(old => old.filter(item => item.id !== quote.id))
+    setNotice('تم حذف عرض السعر')
+  }
+
   const printInvoice = (invoice: Invoice) => {
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
@@ -770,6 +782,7 @@ function InventoryApp({ user }: { user: User }) {
                     <td><span className={inv.status === 'paid' ? 'pill success' : 'pill danger'}>{inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
                     <td className="actions">
                       <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
+                      <button className="icon-btn delete" aria-label="حذف الفاتورة" title="حذف الفاتورة" onClick={() => deleteInvoice(inv)}><Trash2 size={16} /></button>
                       <button className="secondary-btn invoice-status-btn" onClick={() => updateInvoiceStatus(inv, inv.status === 'paid' ? 'unpaid' : 'paid')}>{inv.status === 'paid' ? 'إلغاء السداد' : 'تسجيل مدفوعة'}</button>
                     </td>
                   </tr>
@@ -825,6 +838,9 @@ function InventoryApp({ user }: { user: User }) {
                       onClick={() => printQuote(q)}
                     >
                       <Printer size={17} />
+                    </button>
+                    <button className="icon-btn delete" aria-label="حذف عرض السعر" title="حذف عرض السعر" onClick={() => deleteQuote(q)}>
+                      <Trash2 size={17} />
                     </button>
                   </div>
                 ))}
