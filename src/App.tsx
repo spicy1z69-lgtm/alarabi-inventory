@@ -1219,29 +1219,49 @@ function invoiceHtml(invoice: Invoice) {
   const subtotal = invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
   const total = invoiceTotalFor(invoice)
   const balance = Math.max(0, total - invoice.paidAmount)
-  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>فاتورة ${invoice.number}</title>
-  <style>
-  *{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:32px;color:#17263d;max-width:900px;margin:auto}
-  .head{display:flex;justify-content:space-between;align-items:center;gap:18px;border-bottom:3px solid #244d80;padding-bottom:18px}
-  .brand-lockup{display:flex;align-items:center;gap:16px;min-width:0}.company-logo{width:105px;height:85px;object-fit:contain;flex-shrink:0}
-  h1{font-size:25px;margin:0 0 8px;color:#173456}h2{color:#245b94;margin:22px 0 12px}
-  .tag{background:#eaf1ff;padding:10px 14px;border-radius:8px;font-weight:bold}
-  .meta{line-height:2.1;margin:20px 0}.meta b{display:inline-block;min-width:110px}
-  table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d7e0eb;padding:11px;text-align:right}
-  th{background:#edf3fa}tfoot td{font-weight:bold}.totals{width:330px;margin:20px 0 0 auto}.totals div{display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e5eaf1}
-  .grand{font-size:19px;color:#173456;font-weight:bold;background:#edf3fa}.note{margin-top:22px;padding:12px;background:#f7f9fc;white-space:pre-wrap}
-  .foot{margin-top:48px;padding-top:14px;border-top:1px solid #d7e0eb;color:#66758c;font-size:12px;text-align:center}
-  @media print{body{padding:0}.no-print{display:none}}
-  </style></head><body>
-  <div class="head"><div class="brand-lockup"><img class="company-logo" src="https://i.ibb.co/yB5yr1BD/IMG-5095.jpg" alt="لوجو شركة العربي" onerror="this.style.display='none'"><div><h1>${COMPANY}</h1><div>أنظمة التأريض والحماية من الصواعق</div></div></div><div class="tag">فاتورة بيع</div></div>
-  <h2>فاتورة رقم ${escapeHtml(invoice.number)}</h2>
-  <div class="meta"><div><b>العميل:</b> ${escapeHtml(invoice.customer)}</div><div><b>الهاتف:</b> ${escapeHtml(invoice.phone || '—')}</div><div><b>تاريخ الفاتورة:</b> ${invoice.date}</div><div><b>تاريخ الاستحقاق:</b> ${escapeHtml(invoice.dueDate || '—')}</div><div><b>حالة السداد:</b> ${invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</div></div>
-  <table><thead><tr><th>م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${invoice.items.map((item,index)=>`<tr><td>${index+1}</td><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td><td>${item.quantity}</td><td>${money(item.price)}</td><td>${money(item.quantity*item.price)}</td></tr>`).join('')}</tbody></table>
-  <div class="totals"><div><span>إجمالي الأصناف</span><b>${money(subtotal)}</b></div><div><span>الخصم</span><b>${money(invoice.discount)}</b></div><div><span>الضريبة (${invoice.tax}%)</span><b>${money(Math.max(0,subtotal-invoice.discount)*invoice.tax/100)}</b></div><div class="grand"><span>الإجمالي النهائي</span><b>${money(total)}</b></div><div><span>المدفوع</span><b>${money(invoice.paidAmount)}</b></div><div><span>المتبقي</span><b>${money(balance)}</b></div></div>
-  ${invoice.notes ? `<div class="note"><b>ملاحظات:</b> ${escapeHtml(invoice.notes)}</div>` : ''}
-  <div class="foot">شكرًا لتعاملكم مع ${COMPANY}</div><script>window.onload=()=>window.print()</script></body></html>`
+  const taxAmount = Math.max(0, subtotal - invoice.discount) * invoice.tax / 100
+  const statusLabel = invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'
+  const dateLabel = new Date(invoice.date + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
+  const dueDateLabel = invoice.dueDate
+    ? new Date(invoice.dueDate + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
+    : '—'
+  const logoUrl = 'https://i.ibb.co/yB5yr1BD/IMG-5095.jpg'
+  const rows = invoice.items.map((item, index) =>
+    '<tr><td class="num">' + (index + 1) + '</td><td><span class="item-code">' + escapeHtml(item.code) + '</span></td><td><div class="item-name">' + escapeHtml(item.name) + '</div></td><td class="num">' + item.quantity + '</td><td class="amount">' + money(item.price) + '</td><td class="amount">' + money(item.quantity * item.price) + '</td></tr>'
+  ).join('')
+  const noteHtml = invoice.notes
+    ? '<p>' + escapeHtml(invoice.notes) + '</p>'
+    : '<p class="notes-empty">لا توجد ملاحظات مضافة.</p>'
+  const statusColor = invoice.status === 'paid' ? '#e8f5ed' : invoice.status === 'partial' ? '#fff3dd' : '#fcebea'
+  const statusTextColor = invoice.status === 'paid' ? '#26744d' : invoice.status === 'partial' ? '#8c641c' : '#a23e39'
+  return '<!doctype html>' +
+'<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + COMPANY + '</title><style>' +
+':root{--navy:#173653;--blue:#245b80;--pale:#eef4f8;--line:#d9e2e9;--ink:#253746;--muted:#647787}' +
+'*{box-sizing:border-box}html{background:#eef1f4}body{font-family:Tahoma,Arial,sans-serif;color:var(--ink);margin:0;padding:28px;background:#eef1f4;font-size:13px;line-height:1.7}' +
+'.sheet{width:100%;max-width:850px;min-height:1050px;margin:0 auto;background:#fff;padding:42px 46px;box-shadow:0 8px 32px rgba(20,43,61,.12);position:relative;overflow:hidden}' +
+'.accent{height:7px;background:linear-gradient(90deg,#173653,#3c779a,#c6a66b);position:absolute;top:0;right:0;left:0}' +
+'.head{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:8px 0 24px;border-bottom:1px solid var(--line)}.brand-lockup{display:flex;align-items:center;gap:16px;min-width:0}.company-logo{width:104px;height:86px;object-fit:contain;flex-shrink:0}' +
+'.company-name{font-size:22px;line-height:1.55;font-weight:800;color:var(--navy);margin:0}.company-sub{font-size:11px;color:var(--muted);letter-spacing:.4px}.doc-badge{min-width:145px;text-align:center;background:var(--pale);border:1px solid #dce7ee;border-radius:10px;padding:12px 16px}.doc-badge strong{display:block;font-size:20px;color:var(--navy)}.doc-badge span{font-size:11px;color:var(--muted)}' +
+'.title-row{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin:27px 0 18px}h2{font-size:23px;color:var(--navy);margin:0}.invoice-no{font-size:12px;color:var(--muted)}.invoice-no b{color:var(--blue);font-size:15px;direction:ltr;display:inline-block}' +
+'.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 24px}.detail-card{border:1px solid var(--line);border-radius:9px;padding:13px 15px;min-width:0}.detail-card h3{margin:0 0 7px;font-size:11px;color:var(--muted);font-weight:700}.detail-card .value{font-size:14px;font-weight:700;color:var(--navy);overflow-wrap:anywhere}.detail-card .subvalue{font-size:11px;color:var(--muted);margin-top:3px}.section-title{font-size:13px;color:var(--navy);font-weight:800;margin:0 0 9px}' +
+'table{width:100%;border-collapse:separate;border-spacing:0;margin-top:8px;font-size:12px}thead{display:table-header-group}th{background:var(--navy);color:#fff;font-weight:700;padding:12px 10px;text-align:right;white-space:nowrap}th:first-child{border-radius:0 7px 0 0}th:last-child{border-radius:7px 0 0 0}td{padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}tbody tr:nth-child(even) td{background:#f8fafb}.num{text-align:center;width:38px;color:var(--muted)}.amount{white-space:nowrap;font-variant-numeric:tabular-nums}.item-name{font-weight:700;color:var(--ink)}.item-code{font-size:10px;color:var(--muted);direction:ltr;display:inline-block}' +
+'.bottom-grid{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:24px;align-items:start;margin-top:23px}.notes{border:1px solid var(--line);border-radius:9px;padding:13px 14px;min-height:94px}.notes h3{margin:0 0 6px;font-size:12px;color:var(--navy)}.notes p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}.notes-empty{color:#8a99a5;font-size:11px}' +
+'.totals{border:1px solid var(--line);border-radius:10px;padding:8px 13px}.total-line{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf1f4}.total-line:last-child{border-bottom:0}.total-line span{color:var(--muted)}.total-line b{font-weight:700;color:var(--ink);white-space:nowrap}.total-line.grand{margin:4px -5px;padding:12px 8px;background:var(--pale);border-radius:7px}.total-line.grand span,.total-line.grand b{color:var(--navy);font-weight:800;font-size:15px}.total-line.balance b{color:' + (balance > 0 ? '#9b5b22' : '#26744d') + '}' +
+'.status{display:inline-block;border-radius:30px;padding:3px 10px;font-size:11px;font-weight:700;background:' + statusColor + ';color:' + statusTextColor + '}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:45px;margin-top:42px}.signature{text-align:center;padding-top:10px;border-top:1px solid #aab7c1;color:var(--muted);font-size:11px}.footer{margin-top:36px;padding-top:13px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:10px}.footer strong{display:block;color:var(--navy);font-size:12px;margin-bottom:3px}' +
+'.actions{max-width:850px;margin:0 auto 14px;display:flex;justify-content:flex-end;gap:8px}.actions button{font:inherit;border:0;border-radius:7px;padding:10px 16px;cursor:pointer;background:var(--navy);color:white}.actions .secondary{background:white;color:var(--navy);border:1px solid var(--line)}' +
+'@page{size:A4;margin:12mm}@media print{html,body{background:#fff;padding:0;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{width:100%;max-width:none;min-height:0;margin:0;padding:8mm 7mm;box-shadow:none;overflow:visible}.head,.details,.bottom-grid,.signatures,.footer{break-inside:avoid}tr{break-inside:avoid}}' +
+'@media(max-width:600px){body{padding:10px}.sheet{padding:28px 18px;min-height:0}.head{align-items:flex-start;flex-direction:column}.brand-lockup{gap:10px}.company-logo{width:72px;height:66px}.company-name{font-size:17px}.doc-badge{align-self:flex-end}.details{grid-template-columns:1fr 1fr;gap:7px}.detail-card{padding:10px}.bottom-grid{grid-template-columns:1fr}.signatures{gap:20px}table{font-size:10px}th,td{padding:8px 5px}}' +
+'</style></head><body><div class="actions"><button onclick="window.print()">طباعة الفاتورة / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
+'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + COMPANY + '</h1><div class="company-sub">EARTHING &amp; LIGHTNING PROTECTION</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
+'<section class="title-row"><h2>فاتورة بيع</h2><div class="invoice-no">رقم الفاتورة<br><b>' + escapeHtml(invoice.number) + '</b></div></section>' +
+'<section class="details"><div class="detail-card"><h3>بيانات العميل</h3><div class="value">' + escapeHtml(invoice.customer) + '</div><div class="subvalue">رقم الهاتف: ' + escapeHtml(invoice.phone || 'غير مسجل') + '</div></div>' +
+'<div class="detail-card"><h3>بيانات الفاتورة</h3><div class="value">' + dateLabel + '</div><div class="subvalue">تاريخ الاستحقاق: ' + dueDateLabel + '</div><div class="subvalue">حالة السداد: <span class="status">' + statusLabel + '</span></div></div></section>' +
+'<h3 class="section-title">تفاصيل الأصناف</h3><table><thead><tr><th class="num">م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+'<section class="bottom-grid"><div class="notes"><h3>ملاحظات وشروط</h3>' + noteHtml + '</div><div class="totals">' +
+'<div class="total-line"><span>إجمالي الأصناف</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(invoice.discount) + '</b></div><div class="total-line"><span>الضريبة (' + invoice.tax + '%)</span><b>' + money(taxAmount) + '</b></div><div class="total-line grand"><span>الإجمالي النهائي</span><b>' + money(total) + '</b></div><div class="total-line"><span>المبلغ المدفوع</span><b>' + money(invoice.paidAmount) + '</b></div><div class="total-line balance"><span>المتبقي</span><b>' + money(balance) + '</b></div></div></section>' +
+'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
 }
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [checking, setChecking] = useState(true)
