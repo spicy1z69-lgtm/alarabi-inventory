@@ -298,11 +298,33 @@ function InventoryApp({ user }: { user: User }) {
       setNotice('الخصم لا يمكن أن يكون أكبر من قيمة الأصناف')
       return
     }
+
+    // Validate stock before creating an invoice; combine repeated product rows.
+    const quantitiesByProduct = new Map<string, number>()
+    for (const row of quoteRows) {
+      quantitiesByProduct.set(row.productId, (quantitiesByProduct.get(row.productId) || 0) + row.quantity)
+    }
+    for (const [productId, quantity] of quantitiesByProduct) {
+      const product = products.find(item => item.id === productId)
+      if (!product) {
+        setNotice('يوجد صنف في الفاتورة غير موجود بالمخزون')
+        return
+      }
+      if (quantity > product.quantity) {
+        setNotice(`الكمية المطلوبة من "${product.name}" أكبر من المتاح بالمخزون (المتاح: ${product.quantity})`)
+        return
+      }
+    }
+
+    const nextInvoiceNumber = invoices.reduce((max, item) => {
+      const match = item.number.match(/^INV-(\d+)$/)
+      return match ? Math.max(max, Number(match[1])) : max
+    }, 0) + 1
     const total = invoiceTotal
     const paid = invoiceStatus === 'paid' ? total : Math.min(total, Math.max(0, Number(invoicePaid) || 0))
     const invoice: Invoice = {
       id: crypto.randomUUID(),
-      number: `INV-${String(invoices.length + 1).padStart(4, '0')}`,
+      number: `INV-${String(nextInvoiceNumber).padStart(4, '0')}`,
       customer: invoiceCustomer.trim(),
       phone: invoicePhone.trim(),
       date: today(),
@@ -314,11 +336,15 @@ function InventoryApp({ user }: { user: User }) {
       paidAmount: paid,
       notes: invoiceNotes.trim(),
     }
+    setProducts(old => old.map(product => ({
+      ...product,
+      quantity: product.quantity - (quantitiesByProduct.get(product.id) || 0),
+    })))
     setInvoices(old => [invoice, ...old])
     setInvoiceModal(false)
     setTab('invoices')
     resetInvoiceDraft()
-    setNotice('تم حفظ الفاتورة بنجاح')
+    setNotice('تم حفظ الفاتورة وخصم الكميات من المخزون بنجاح')
   }
 
   const printInvoice = (invoice: Invoice) => {
