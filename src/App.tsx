@@ -335,6 +335,39 @@ function InventoryApp({ user }: { user: User }) {
     setNotice('تم حفظ الصنف')
   }
 
+  const recordStockMovement = () => {
+    if (!products.length) { setNotice('أضف صنفًا أولًا'); return }
+    const code = window.prompt('اكتب كود الصنف المراد تسجيل حركته:')
+    if (!code?.trim()) return
+    const product = products.find(item => item.code.toLowerCase() === code.trim().toLowerCase())
+    if (!product) { setNotice('لم يتم العثور على صنف بهذا الكود'); return }
+    const direction = window.prompt('نوع الحركة: اكتب دخول لإضافة كمية أو خروج لخصم كمية')
+    if (!direction) return
+    const normalized = direction.trim().toLowerCase()
+    const kind = ['دخول', 'دخول بضاعة', 'in', 'دخول'].includes(normalized) ? 'in' : ['خروج', 'صرف', 'out'].includes(normalized) ? 'out' : null
+    if (!kind) { setNotice('نوع الحركة غير صحيح. اكتب دخول أو خروج'); return }
+    const rawQuantity = window.prompt('اكتب الكمية:')
+    if (rawQuantity === null) return
+    const quantity = Number(rawQuantity)
+    if (!Number.isFinite(quantity) || quantity <= 0) { setNotice('اكتب كمية أكبر من صفر'); return }
+    if (kind === 'out' && quantity > product.quantity) { setNotice('الكمية المطلوبة أكبر من الرصيد الحالي (' + product.quantity + ')'); return }
+    const reason = window.prompt('سبب الحركة (مثال: شراء بضاعة، صرف للمشروع):')?.trim()
+    if (!reason) { setNotice('اكتب سبب الحركة'); return }
+    const delta = kind === 'in' ? quantity : -quantity
+    setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: item.quantity + delta } : item))
+    setStockMovements(old => [{
+      id: crypto.randomUUID(),
+      productId: product.id,
+      productName: product.name,
+      kind,
+      quantity,
+      reason,
+      reference: 'حركة يدوية',
+      date: today(),
+    }, ...old])
+    setNotice(kind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الرصيد' : 'تم تسجيل خروج البضاعة وتحديث الرصيد')
+  }
+
   const addQuoteRow = (p: Product) => {
     setQuoteRows(old => {
       const existing = old.find(x => x.productId === p.id)
@@ -864,9 +897,14 @@ function InventoryApp({ user }: { user: User }) {
                 <p>إدارة أكواد الأصناف والكميات والأسعار</p>
               </div>
 
-              <button className="primary-btn" onClick={() => openProduct()}>
-                <Plus size={17} /> إضافة صنف
-              </button>
+              <div className="products-actions">
+                <button className="secondary-button" onClick={recordStockMovement}>
+                  <Boxes size={17} /> تسجيل حركة مخزون
+                </button>
+                <button className="primary-btn" onClick={() => openProduct()}>
+                  <Plus size={17} /> إضافة صنف
+                </button>
+              </div>
             </div>
 
             <div className="toolbar">
