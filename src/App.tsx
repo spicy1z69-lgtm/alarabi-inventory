@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign,
 } from 'lucide-react'
-import type { Product, Quote, QuoteItem } from './types'
+import type { Product, Quote, QuoteItem, Invoice } from './types'
 
 const COMPANY = 'العربي لأنظمة التأريض والحماية من الصواعق'
 
@@ -84,7 +84,7 @@ const load = <T,>(key: string, fallback: T): T => {
   }
 }
 
-type Tab = 'dashboard' | 'products' | 'quotes'
+type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('dashboard')
@@ -94,6 +94,18 @@ export default function App() {
   const [quotes, setQuotes] = useState<Quote[]>(() =>
     load('alarabi-quotes', [])
   )
+  const [invoices, setInvoices] = useState<Invoice[]>(() =>
+    load('alarabi-invoices', [])
+  )
+  const [invoiceModal, setInvoiceModal] = useState(false)
+  const [invoiceCustomer, setInvoiceCustomer] = useState('')
+  const [invoicePhone, setInvoicePhone] = useState('')
+  const [invoiceDueDate, setInvoiceDueDate] = useState('')
+  const [invoiceDiscount, setInvoiceDiscount] = useState('0')
+  const [invoiceTax, setInvoiceTax] = useState('0')
+  const [invoiceStatus, setInvoiceStatus] = useState<'paid' | 'unpaid' | 'partial'>('unpaid')
+  const [invoicePaid, setInvoicePaid] = useState('0')
+  const [invoiceNotes, setInvoiceNotes] = useState('')
   const [query, setQuery] = useState('')
   const [productModal, setProductModal] = useState<Product | null | 'new'>(null)
   const [quoteModal, setQuoteModal] = useState(false)
@@ -116,6 +128,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
   }, [quotes])
+
+  useEffect(() => {
+    localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
+  }, [invoices])
 
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.quantity * p.price,
@@ -213,6 +229,76 @@ export default function App() {
     (sum, row) => sum + row.quantity * row.price,
     0
   )
+  const invoiceSubtotal = quoteTotal
+  const invoiceDiscountValue = Math.max(0, Number(invoiceDiscount) || 0)
+  const invoiceTaxValue = Math.max(0, Number(invoiceTax) || 0)
+  const invoiceTotal = Math.max(0, invoiceSubtotal - invoiceDiscountValue) * (1 + invoiceTaxValue / 100)
+  const invoiceBalance = Math.max(0, invoiceTotal - (Number(invoicePaid) || 0))
+
+  const resetInvoiceDraft = () => {
+    setInvoiceCustomer('')
+    setInvoicePhone('')
+    setInvoiceDueDate('')
+    setInvoiceDiscount('0')
+    setInvoiceTax('0')
+    setInvoiceStatus('unpaid')
+    setInvoicePaid('0')
+    setInvoiceNotes('')
+    setQuoteRows([])
+  }
+
+  const saveInvoice = () => {
+    if (!invoiceCustomer.trim() || !quoteRows.length) {
+      setNotice('اكتب اسم العميل وأضف صنفًا واحدًا على الأقل')
+      return
+    }
+    if (invoiceDiscountValue > invoiceSubtotal) {
+      setNotice('الخصم لا يمكن أن يكون أكبر من قيمة الأصناف')
+      return
+    }
+    const total = invoiceTotal
+    const paid = invoiceStatus === 'paid' ? total : Math.min(total, Math.max(0, Number(invoicePaid) || 0))
+    const invoice: Invoice = {
+      id: crypto.randomUUID(),
+      number: `INV-${String(invoices.length + 1).padStart(4, '0')}`,
+      customer: invoiceCustomer.trim(),
+      phone: invoicePhone.trim(),
+      date: today(),
+      dueDate: invoiceDueDate,
+      items: quoteRows.map(row => ({...row})),
+      discount: invoiceDiscountValue,
+      tax: invoiceTaxValue,
+      status: invoiceStatus === 'paid' || paid >= total ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+      paidAmount: paid,
+      notes: invoiceNotes.trim(),
+    }
+    setInvoices(old => [invoice, ...old])
+    setInvoiceModal(false)
+    setTab('invoices')
+    resetInvoiceDraft()
+    setNotice('تم حفظ الفاتورة بنجاح')
+  }
+
+  const printInvoice = (invoice: Invoice) => {
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      setNotice('اسمح بفتح النوافذ المنبثقة لطباعة الفاتورة')
+      return
+    }
+    printWindow.document.write(invoiceHtml(invoice))
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
+  const updateInvoiceStatus = (invoice: Invoice, status: Invoice['status']) => {
+    const paidAmount = status === 'paid'
+      ? invoiceTotalFor(invoice)
+      : status === 'unpaid' ? 0 : invoice.paidAmount
+    setInvoices(old => old.map(item => item.id === invoice.id
+      ? {...item, status, paidAmount: Math.min(invoiceTotalFor(item), paidAmount)}
+      : item))
+  }
 
   const saveQuote = () => {
     if (!customer.trim() || !quoteRows.length) {
@@ -307,7 +393,7 @@ export default function App() {
                 ? 'لوحة التحكم'
                 : tab === 'products'
                   ? 'الأصناف والمخزون'
-                  : 'عروض الأسعار'}
+                  : tab === 'quotes' ? 'عروض الأسعار' : 'الفواتير'}
             </h1>
           </div>
 
@@ -581,6 +667,39 @@ export default function App() {
           </section>
         )}
 
+        {tab === 'invoices' && (
+          <>
+            <section className="stats-grid invoice-stats">
+              <Stat icon={<Receipt />} label="إجمالي الفواتير" value={String(invoices.length)} foot="فاتورة مسجلة" />
+              <Stat icon={<CircleDollarSign />} label="إجمالي المبيعات" value={money(invoices.reduce((s, i) => s + invoiceTotalFor(i), 0))} foot="قيمة الفواتير" />
+              <Stat icon={<Check />} label="المحصّل" value={money(invoices.reduce((s, i) => s + i.paidAmount, 0))} foot="مبالغ مدفوعة" />
+              <Stat icon={<AlertTriangle />} label="المتبقي" value={money(invoices.reduce((s, i) => s + Math.max(0, invoiceTotalFor(i) - i.paidAmount), 0))} foot="مبالغ مستحقة" warning={invoices.some(i => invoiceTotalFor(i) > i.paidAmount)} />
+            </section>
+            <section className="panel">
+              <div className="panel-head products-head">
+                <div><h3>إدارة الفواتير</h3><p>إنشاء فاتورة، متابعة التحصيل، وطباعة نسخة PDF</p></div>
+                <button className="primary-btn" onClick={() => { resetInvoiceDraft(); setInvoiceModal(true) }}><Plus size={17} /> فاتورة جديدة</button>
+              </div>
+              {invoices.length ? <div className="table-wrap"><table>
+                <thead><tr><th>رقم الفاتورة</th><th>العميل</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+                <tbody>{invoices.map(inv => {
+                  const total = invoiceTotalFor(inv)
+                  const balance = Math.max(0, total - inv.paidAmount)
+                  return <tr key={inv.id}>
+                    <td><code>{inv.number}</code></td><td className="product-cell">{inv.customer}</td><td>{inv.date}</td>
+                    <td>{money(total)}</td><td>{money(inv.paidAmount)}</td><td>{money(balance)}</td>
+                    <td><span className={inv.status === 'paid' ? 'pill success' : 'pill danger'}>{inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
+                    <td className="actions">
+                      <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
+                      <button className="secondary-btn invoice-status-btn" onClick={() => updateInvoiceStatus(inv, inv.status === 'paid' ? 'unpaid' : 'paid')}>{inv.status === 'paid' ? 'إلغاء السداد' : 'تسجيل مدفوعة'}</button>
+                    </td>
+                  </tr>
+                })}</tbody>
+              </table></div> : <Empty title="لسه مفيش فواتير" detail="اضغط فاتورة جديدة لإنشاء أول فاتورة." />}
+            </section>
+          </>
+        )}
+
         {tab === 'quotes' && (
           <section className="panel">
             <div className="panel-head products-head">
@@ -844,6 +963,28 @@ export default function App() {
         </div>
       )}
 
+      {invoiceModal && (
+        <div className="modal-backdrop" onClick={() => setInvoiceModal(false)}>
+          <section className="modal wide" onClick={e => e.stopPropagation()}>
+            <div className="modal-head"><div><h2>إنشاء فاتورة جديدة</h2><p>فاتورة بيع رسمية قابلة للطباعة أو الحفظ PDF</p></div><button className="icon-btn" onClick={() => setInvoiceModal(false)}><X /></button></div>
+            <div className="form-grid">
+              <Field label="اسم العميل / الشركة *" value={invoiceCustomer} onChange={setInvoiceCustomer} placeholder="اسم العميل" />
+              <Field label="رقم الهاتف" value={invoicePhone} onChange={setInvoicePhone} placeholder="01xxxxxxxxx" />
+              <Field label="تاريخ الاستحقاق" type="date" value={invoiceDueDate} onChange={setInvoiceDueDate} />
+              <Field label="الخصم (جنيه)" type="number" value={invoiceDiscount} onChange={setInvoiceDiscount} />
+              <Field label="الضريبة (%)" type="number" value={invoiceTax} onChange={setInvoiceTax} />
+              <Field label="المبلغ المدفوع (جنيه)" type="number" value={invoicePaid} onChange={v => {setInvoicePaid(v); setInvoiceStatus(Number(v) > 0 ? 'partial' : 'unpaid')}} />
+            </div>
+            <div className="pick-products"><h4>اختار الأصناف</h4>{products.map(p => <button className="pick-row" key={p.id} onClick={() => addQuoteRow(p)}><span><b>{p.name}</b><small>{p.code} · {money(p.price)} للوحدة · المتاح {p.quantity}</small></span><Plus size={18} /></button>)}</div>
+            {quoteRows.length > 0 && <div className="quote-draft"><h4>تفاصيل الفاتورة</h4>{quoteRows.map(row => <div className="draft-row" key={row.productId}><span>{row.name}<small>{money(row.price)} للوحدة</small></span><input aria-label="الكمية" type="number" min="1" value={row.quantity} onChange={e => setQuoteRows(old => old.map(x => x.productId === row.productId ? {...x, quantity: Math.max(1, Number(e.target.value) || 1)} : x))} /><strong>{money(row.quantity * row.price)}</strong><button className="icon-btn delete" onClick={() => setQuoteRows(old => old.filter(x => x.productId !== row.productId))}><X size={16} /></button></div>)}
+              <Field label="ملاحظات الفاتورة" value={invoiceNotes} onChange={setInvoiceNotes} placeholder="طريقة التسليم أو أي ملاحظات" />
+              <div className="invoice-summary"><div><span>إجمالي الأصناف</span><b>{money(invoiceSubtotal)}</b></div><div><span>الخصم</span><b>{money(invoiceDiscountValue)}</b></div><div><span>الضريبة</span><b>{money(Math.max(0, invoiceSubtotal - invoiceDiscountValue) * invoiceTaxValue / 100)}</b></div><div className="total-row"><span>الإجمالي النهائي</span><strong>{money(invoiceTotal)}</strong></div><div><span>المتبقي للتحصيل</span><b>{money(invoiceBalance)}</b></div></div>
+            </div>}
+            <div className="modal-actions"><button className="secondary-btn" onClick={() => setInvoiceModal(false)}>إلغاء</button><button className="primary-btn" onClick={saveInvoice}><Check size={17} /> حفظ الفاتورة</button></div>
+          </section>
+        </div>
+      )}
+
       <footer className="footer">
         <span>
           © {new Date().getFullYear()} {COMPANY}
@@ -988,4 +1129,35 @@ function escapeHtml(s: string) {
       "'": '&#39;',
     })[c] as string
   )
+}
+
+function invoiceTotalFor(invoice: Invoice) {
+  const subtotal = invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  return Math.max(0, subtotal - invoice.discount) * (1 + invoice.tax / 100)
+}
+
+function invoiceHtml(invoice: Invoice) {
+  const subtotal = invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  const total = invoiceTotalFor(invoice)
+  const balance = Math.max(0, total - invoice.paidAmount)
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>فاتورة ${invoice.number}</title>
+  <style>
+  *{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:32px;color:#17263d;max-width:900px;margin:auto}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #244d80;padding-bottom:18px}
+  h1{font-size:25px;margin:0 0 8px;color:#173456}h2{color:#245b94;margin:22px 0 12px}
+  .tag{background:#eaf1ff;padding:10px 14px;border-radius:8px;font-weight:bold}
+  .meta{line-height:2.1;margin:20px 0}.meta b{display:inline-block;min-width:110px}
+  table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #d7e0eb;padding:11px;text-align:right}
+  th{background:#edf3fa}tfoot td{font-weight:bold}.totals{width:330px;margin:20px 0 0 auto}.totals div{display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #e5eaf1}
+  .grand{font-size:19px;color:#173456;font-weight:bold;background:#edf3fa}.note{margin-top:22px;padding:12px;background:#f7f9fc;white-space:pre-wrap}
+  .foot{margin-top:48px;padding-top:14px;border-top:1px solid #d7e0eb;color:#66758c;font-size:12px;text-align:center}
+  @media print{body{padding:0}.no-print{display:none}}
+  </style></head><body>
+  <div class="head"><div><h1>${COMPANY}</h1><div>أنظمة التأريض والحماية من الصواعق</div></div><div class="tag">فاتورة بيع</div></div>
+  <h2>فاتورة رقم ${escapeHtml(invoice.number)}</h2>
+  <div class="meta"><div><b>العميل:</b> ${escapeHtml(invoice.customer)}</div><div><b>الهاتف:</b> ${escapeHtml(invoice.phone || '—')}</div><div><b>تاريخ الفاتورة:</b> ${invoice.date}</div><div><b>تاريخ الاستحقاق:</b> ${escapeHtml(invoice.dueDate || '—')}</div><div><b>حالة السداد:</b> ${invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</div></div>
+  <table><thead><tr><th>م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${invoice.items.map((item,index)=>`<tr><td>${index+1}</td><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td><td>${item.quantity}</td><td>${money(item.price)}</td><td>${money(item.quantity*item.price)}</td></tr>`).join('')}</tbody></table>
+  <div class="totals"><div><span>إجمالي الأصناف</span><b>${money(subtotal)}</b></div><div><span>الخصم</span><b>${money(invoice.discount)}</b></div><div><span>الضريبة (${invoice.tax}%)</span><b>${money(Math.max(0,subtotal-invoice.discount)*invoice.tax/100)}</b></div><div class="grand"><span>الإجمالي النهائي</span><b>${money(total)}</b></div><div><span>المدفوع</span><b>${money(invoice.paidAmount)}</b></div><div><span>المتبقي</span><b>${money(balance)}</b></div></div>
+  ${invoice.notes ? `<div class="note"><b>ملاحظات:</b> ${escapeHtml(invoice.notes)}</div>` : ''}
+  <div class="foot">شكرًا لتعاملكم مع ${COMPANY}</div><script>window.onload=()=>window.print()</script></body></html>`
 }
