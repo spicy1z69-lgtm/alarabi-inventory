@@ -132,7 +132,7 @@ function InventoryApp({ user }: { user: User }) {
       setCloudError('')
       const { data, error } = await supabase.from('app_state').select('state_key,state_value').eq('owner_id', user.id)
       if (!active) return
-      if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message); setCloudLoaded(true); return }
+      if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message + ' — لم يتم تحميل البيانات، أعد المحاولة بعد إصلاح الاتصال.'); return }
       const values = new Map((data ?? []).map(row => [row.state_key, row.state_value]))
       const records = [
         { key: 'products', localKey: 'alarabi-products', fallback: seed, setter: setProducts },
