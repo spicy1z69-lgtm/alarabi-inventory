@@ -1992,3 +1992,17 @@ input[type="email"], input[type="tel"], input[type="password"], select, textarea
 .section-title {
   border-color: #303035 !important;
 }
+
+
+/* Dark background for the dashboard top header and brand/date text area */
+.topbar {
+  background: #0b0b0d !important;
+  color: #f4f4f5 !important;
+  border-bottom-color: #303035 !important;
+}
+.topbar h1, .topbar h2, .topbar p, .topbar small,
+.topbar .eyebrow, .topbar .date, .topbar .brand-caption {
+  background: transparent !important;
+  color: #f4f4f5 !important;
+}
+.topbar .eyebrow, .topbar small { color: #a1a1aa !important; }
