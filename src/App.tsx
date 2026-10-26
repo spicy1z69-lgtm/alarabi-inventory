@@ -1140,64 +1140,28 @@ function Field({
 }
 
 function quoteHtml(q: Quote) {
-  const total = q.items.reduce(
-    (s, x) => s + x.quantity * x.price,
-    0
-  )
-
-  return `<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="utf-8">
-<title>عرض سعر ${q.number}</title>
-<style>
-body{font-family:Arial,sans-serif;padding:36px;color:#18232d}
-h1{border-bottom:2px solid #18232d;padding-bottom:16px}
-h2{font-size:16px;font-weight:normal}
-table{width:100%;border-collapse:collapse;margin-top:24px}
-th,td{border:1px solid #cbd2d8;padding:12px;text-align:right}
-th{background:#f1f4f6}
-.total{text-align:left;margin-top:24px;font-size:20px;font-weight:bold}
-.meta{line-height:2}
-</style>
-</head>
-<body>
-<h1>${COMPANY}</h1>
-<h2>عرض سعر</h2>
-<div class="meta">
-رقم العرض: ${q.number}<br>
-العميل: ${escapeHtml(q.customer)}<br>
-التاريخ: ${q.date}
-</div>
-<table>
-<thead>
-<tr>
-<th>الكود</th>
-<th>الصنف</th>
-<th>الكمية</th>
-<th>سعر الوحدة</th>
-<th>الإجمالي</th>
-</tr>
-</thead>
-<tbody>
-${q.items
-  .map(
-    x => `<tr>
-<td>${escapeHtml(x.code)}</td>
-<td>${escapeHtml(x.name)}</td>
-<td>${x.quantity}</td>
-<td>${x.price.toFixed(2)} ج.م</td>
-<td>${(x.quantity * x.price).toFixed(2)} ج.م</td>
-</tr>`
-  )
-  .join('')}
-</tbody>
-</table>
-<div class="total">الإجمالي: ${total.toFixed(2)} جنيه مصري</div>
-</body>
-</html>`
+  const subtotal = q.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+  const dateLabel = new Date(q.date + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
+  const logoUrl = 'https://i.ibb.co/yB5yr1BD/IMG-5095.jpg'
+  const rows = q.items.map((item, index) =>
+    '<tr><td class="center">' + (index + 1) + '</td><td><span class="code">' + escapeHtml(item.code) + '</span></td><td class="item">' + escapeHtml(item.name) + '</td><td class="center">' + item.quantity + '</td><td class="money">' + item.price.toFixed(2) + ' ج.م</td><td class="money">' + (item.quantity * item.price).toFixed(2) + ' ج.م</td></tr>'
+  ).join('')
+  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>عرض سعر ' + escapeHtml(q.number) + '</title><style>' +
+  ':root{--navy:#103b60;--blue:#155581;--gold:#d6a84f;--ink:#1d3448;--muted:#65798b;--line:#d8e3ec;--pale:#f0f5f9}' +
+  '*{box-sizing:border-box}html{background:#edf1f5}body{margin:0;padding:24px;background:#edf1f5;color:var(--ink);font:13px/1.7 Tahoma,Arial,sans-serif}.actions{max-width:900px;margin:0 auto 14px;display:flex;gap:8px;justify-content:flex-end}.actions button{border:0;border-radius:8px;padding:11px 18px;background:var(--navy);color:#fff;font:inherit;font-weight:bold;cursor:pointer}.actions .secondary{background:#fff;color:var(--navy);border:1px solid var(--line)}' +
+  '.sheet{max-width:900px;min-height:1120px;margin:auto;background:#fff;position:relative;overflow:hidden;box-shadow:0 12px 38px #18344b18}.top-stripe{height:8px;background:linear-gradient(90deg,var(--navy) 0%,var(--blue) 68%,var(--gold) 100%)}.header{padding:28px 34px 23px;display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:15px;min-width:0}.logo{width:90px;height:78px;object-fit:contain}.company{font-size:21px;line-height:1.5;font-weight:800;color:var(--navy);margin:0}.subtitle{font-size:10px;letter-spacing:.5px;color:var(--muted)}.tagline{font-size:11px;color:var(--blue);margin-top:5px}.doc-chip{background:var(--navy);color:white;border-radius:10px;padding:13px 19px;text-align:center;min-width:150px;box-shadow:0 5px 12px #103b6020}.doc-chip strong{display:block;font-size:23px;line-height:1.4}.doc-chip span{font-size:10px;letter-spacing:1.4px;color:#dce9f3}' +
+  '.intro{padding:25px 34px 15px;display:flex;align-items:end;justify-content:space-between;gap:15px}.intro h2{margin:0;color:var(--navy);font-size:26px}.intro p{margin:5px 0 0;color:var(--muted);font-size:12px}.number{text-align:left;color:var(--muted);font-size:11px}.number b{display:block;color:var(--blue);font-size:16px;direction:ltr}.details{padding:0 34px 20px;display:grid;grid-template-columns:1fr 1fr;gap:13px}.detail{background:var(--pale);border:1px solid #e3ebf1;border-radius:10px;padding:14px 16px}.detail h3{margin:0 0 9px;font-size:12px;color:var(--blue)}.detail-row{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #dbe5ed}.detail-row:last-child{border-bottom:0}.detail-row span{color:var(--muted)}.detail-row b{color:var(--navy);text-align:left;overflow-wrap:anywhere}' +
+  '.table-wrap{padding:0 34px}table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px;border:1px solid var(--line);border-radius:9px;overflow:hidden}thead{display:table-header-group}th{background:var(--navy);color:#fff;text-align:right;padding:12px 9px;font-weight:700}td{padding:12px 9px;border-bottom:1px solid var(--line);background:#fff}tbody tr:nth-child(even) td{background:#f7fafc}tbody tr:last-child td{border-bottom:0}.center{text-align:center;white-space:nowrap}.money{white-space:nowrap;font-variant-numeric:tabular-nums}.code{direction:ltr;display:inline-block;color:var(--blue);font-size:10px;font-weight:bold}.item{font-weight:700}' +
+  '.lower{padding:20px 34px 0;display:grid;grid-template-columns:1fr 1.08fr;gap:18px;align-items:stretch}.notes,.totals{border:1px solid var(--line);border-radius:10px;overflow:hidden}.notes{background:#f8fafc;padding:16px}.notes h3{margin:0 0 9px;color:var(--navy);font-size:14px}.notes p{margin:0 0 7px;color:var(--muted);font-size:11px}.notes ul{margin:8px 0 0;padding-right:18px;color:var(--ink);font-size:11px}.totals{padding:8px 15px}.sum-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #e8eef3}.sum-row span{color:var(--muted)}.sum-row b{white-space:nowrap;font-variant-numeric:tabular-nums}.sum-row.final{margin:8px -8px -1px;padding:14px 12px;background:var(--navy);color:#fff;border-radius:7px}.sum-row.final span,.sum-row.final b{color:#fff;font-size:15px;font-weight:800}.terms{padding:18px 34px 0;font-size:10px;color:var(--muted)}.terms strong{color:var(--navy)}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;padding:35px 55px 28px}.sign{border-top:1px dashed #8da2b3;text-align:center;padding-top:9px;color:var(--navy);font-size:11px;font-weight:bold;min-height:43px}.footer{background:var(--navy);color:#eaf2f8;padding:16px 34px;display:flex;justify-content:space-between;align-items:center;gap:15px;font-size:10px}.footer strong{color:#fff;font-size:12px}.footer .motto{color:#f0c66e;font-size:12px;font-weight:bold}' +
+  '@page{size:A4;margin:10mm}@media print{html,body{background:#fff;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{max-width:none;min-height:0;box-shadow:none}.header,.details,.table-wrap,.lower,.terms,.signatures{break-inside:avoid}.footer{break-inside:avoid}}@media(max-width:620px){body{padding:8px}.header{padding:20px 16px;align-items:flex-start;flex-direction:column}.logo{width:65px;height:62px}.company{font-size:16px}.doc-chip{align-self:flex-end}.intro{padding:20px 16px 12px}.intro h2{font-size:22px}.details{padding:0 16px 16px;grid-template-columns:1fr}.table-wrap{padding:0 10px;overflow-x:auto}table{min-width:570px}.lower{padding:16px;grid-template-columns:1fr}.terms{padding:12px 16px 0}.signatures{padding:28px 22px;gap:25px}.footer{padding:15px;flex-wrap:wrap}}' +
+  '</style></head><body><div class="actions"><button onclick="window.print()">طباعة عرض السعر / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
+  '<main class="sheet"><div class="top-stripe"></div><header class="header"><div class="brand"><img class="logo" src="' + logoUrl + '" alt="شعار العربي" onerror="this.style.display=\'none\'"><div><h1 class="company">' + COMPANY + '</h1><div class="subtitle">EARTHING &amp; LIGHTNING PROTECTION</div><div class="tagline">أمان · حماية · استمرارية</div></div></div><div class="doc-chip"><strong>عرض سعر</strong><span>QUOTATION</span></div></header>' +
+  '<section class="intro"><div><h2>عرض سعر</h2><p>نشكركم على اهتمامكم بالتعامل معنا، ويسعدنا تقديم عرض السعر التالي.</p></div><div class="number">رقم العرض<b>' + escapeHtml(q.number) + '</b></div></section>' +
+  '<section class="details"><div class="detail"><h3>بيانات العميل</h3><div class="detail-row"><span>اسم العميل / الشركة</span><b>' + escapeHtml(q.customer) + '</b></div><div class="detail-row"><span>رقم الهاتف</span><b>—</b></div><div class="detail-row"><span>العنوان</span><b>—</b></div><div class="detail-row"><span>تاريخ العرض</span><b>' + dateLabel + '</b></div></div><div class="detail"><h3>بيانات العرض</h3><div class="detail-row"><span>رقم العرض</span><b>' + escapeHtml(q.number) + '</b></div><div class="detail-row"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="detail-row"><span>مدة الصلاحية</span><b>7 أيام</b></div><div class="detail-row"><span>طريقة الدفع</span><b>نقدًا / تحويل بنكي</b></div></div></section>' +
+  '<div class="table-wrap"><table><thead><tr><th class="center">م</th><th>كود الصنف</th><th>الصنف / الوصف</th><th class="center">الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+  '<section class="lower"><div class="notes"><h3>ملاحظات وشروط</h3><p>يرجى مراجعة تفاصيل الأصناف والكميات والأسعار قبل اعتماد العرض.</p><ul><li>الأسعار تشمل التوريد فقط ما لم يُذكر خلاف ذلك.</li><li>مدة التوريد حسب التوفر في المخزون.</li><li>الضمان حسب شروط الشركة المصنعة.</li><li>هذا العرض ساري لمدة 7 أيام من تاريخ الإصدار.</li></ul></div><div class="totals"><div class="sum-row"><span>إجمالي المبلغ قبل الخصم</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div><div class="sum-row"><span>الخصم</span><b>0.00 ج.م</b></div><div class="sum-row"><span>إجمالي المبلغ بعد الخصم</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div><div class="sum-row"><span>الضريبة (0%)</span><b>0.00 ج.م</b></div><div class="sum-row final"><span>المبلغ الإجمالي</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div></div></section>' +
+  '<div class="terms"><strong>تنويه:</strong> يتم اعتماد الطلب بعد موافقة العميل على الكميات والأسعار وشروط التوريد.</div><section class="signatures"><div class="sign">توقيع العميل</div><div class="sign">إدارة الشركة / الختم</div></section><footer class="footer"><div><strong>' + COMPANY + '</strong><br>القليوبية - مصر</div><div>للاستفسار وطلب الأسعار<br>01012345678</div><div>البريد الإلكتروني<br>info@alarabi-eg.com</div><div class="motto">معاً نحو بيئة أكثر أماناً</div></footer></main></body></html>'
 }
-
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c =>
     ({
