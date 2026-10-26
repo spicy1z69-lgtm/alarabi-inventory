@@ -2024,3 +2024,29 @@ table tbody tr, table tbody td {
 table tbody tr:hover, table tbody tr:hover td {
   background-color: #202024 !important;
 }
+
+
+/* Reports center — technical navy/graphite with restrained red accents */
+.reports-page { display: grid; gap: 18px; }
+.report-filters { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)) auto; gap: 12px; align-items: end; padding: 4px 0 8px; }
+.report-filters label { display: grid; gap: 7px; color: #a1a1aa; font-size: 12px; }
+.report-filters input, .report-filters select { width: 100%; min-height: 42px; border: 1px solid #3f3f46; border-radius: 8px; padding: 9px 11px; background: #17171b; color: #f4f4f5; }
+.report-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.report-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.reports-page .panel { border: 1px solid #30343b; border-top: 2px solid #b8323c; }
+.reports-page .panel-head h3 { color: #f4f4f5; }
+.reports-page .panel-head p { color: #a1a1aa; }
+.reports-page table { min-width: 680px; }
+.reports-page th { background: #172b40 !important; color: #f8fafc !important; border-bottom: 2px solid #b8323c !important; }
+.reports-page .primary-btn { background: #173653; border: 1px solid #c83d46; }
+.reports-page .secondary-btn { background: #242429; color: #f4f4f5; border: 1px solid #45454d; border-radius: 8px; padding: 10px 13px; cursor: pointer; }
+.report-mark { color: #c83d46; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; }
+@media (max-width: 850px) {
+  .report-filters { grid-template-columns: 1fr 1fr; }
+  .report-stats { grid-template-columns: 1fr; }
+  .report-actions { width: 100%; }
+}
+@media (max-width: 520px) {
+  .report-filters { grid-template-columns: 1fr; }
+  .report-actions button { width: 100%; justify-content: center; }
+}
