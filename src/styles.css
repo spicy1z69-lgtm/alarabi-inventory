@@ -1805,3 +1805,87 @@ button:focus-visible, input:focus-visible { outline-color: #ff6874; }
 @media (max-width: 700px) {
   .sidebar { background: linear-gradient(135deg, #080809, #171719); }
 }
+
+
+/* Consistent, aligned button system */
+button {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.primary-btn, .primary-button, .secondary-btn, .secondary-button, .text-button, .icon-btn, .nav-item, .notice {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  vertical-align: middle;
+  line-height: 1.35;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.primary-btn, .primary-button, .secondary-btn, .secondary-button {
+  min-height: 42px;
+  padding: 10px 15px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.primary-btn, .primary-button {
+  border: 1px solid #e11d2e;
+  background: linear-gradient(135deg, #f02b3b, #b51220);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(225,29,46,.15);
+}
+.secondary-btn, .secondary-button {
+  border: 1px solid #393940;
+  background: #202024;
+  color: #e4e4e7;
+}
+.primary-btn:hover, .primary-button:hover, .secondary-btn:hover, .secondary-button:hover {
+  transform: translateY(-1px);
+}
+.primary-btn:active, .primary-button:active, .secondary-btn:active, .secondary-button:active {
+  transform: translateY(0);
+}
+.text-button {
+  border: 0;
+  background: transparent;
+  color: #ff6874;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.text-button:hover { background: rgba(225,29,46,.12); }
+.icon-btn {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  padding: 0;
+  border: 1px solid #35353b;
+  border-radius: 10px;
+  background: #1b1b1f;
+  color: #d4d4db;
+  cursor: pointer;
+}
+.icon-btn.delete { color: #ff6874; }
+.icon-btn:hover { border-color: #e11d2e; background: #2a2023; }
+button:disabled { opacity: .5; cursor: not-allowed; transform: none !important; box-shadow: none; }
+button:focus-visible { outline: 2px solid #ff6874; outline-offset: 2px; }
+.actions { vertical-align: middle; white-space: nowrap; }
+.actions .icon-btn + .icon-btn, .actions .icon-btn + .secondary-btn { margin-inline-start: 5px; }
+.modal-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.backup-actions, .products-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.panel-head > button { flex-shrink: 0; }
+@media (max-width: 700px) {
+  .primary-btn, .primary-button, .secondary-btn, .secondary-button {
+    min-height: 40px;
+    padding: 9px 12px;
+    font-size: 13px;
+  }
+  .panel-head { gap: 12px; }
+  .panel-head > button { max-width: 100%; }
+  .modal-actions { gap: 8px; }
+  .icon-btn { width: 36px; height: 36px; min-width: 36px; }
+}
