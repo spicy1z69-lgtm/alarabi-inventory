@@ -1222,7 +1222,8 @@ function invoiceHtml(invoice: Invoice) {
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>فاتورة ${invoice.number}</title>
   <style>
   *{box-sizing:border-box}body{font-family:Arial,sans-serif;padding:32px;color:#17263d;max-width:900px;margin:auto}
-  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #244d80;padding-bottom:18px}
+  .head{display:flex;justify-content:space-between;align-items:center;gap:18px;border-bottom:3px solid #244d80;padding-bottom:18px}
+  .brand-lockup{display:flex;align-items:center;gap:16px;min-width:0}.company-logo{width:105px;height:85px;object-fit:contain;flex-shrink:0}
   h1{font-size:25px;margin:0 0 8px;color:#173456}h2{color:#245b94;margin:22px 0 12px}
   .tag{background:#eaf1ff;padding:10px 14px;border-radius:8px;font-weight:bold}
   .meta{line-height:2.1;margin:20px 0}.meta b{display:inline-block;min-width:110px}
@@ -1232,7 +1233,7 @@ function invoiceHtml(invoice: Invoice) {
   .foot{margin-top:48px;padding-top:14px;border-top:1px solid #d7e0eb;color:#66758c;font-size:12px;text-align:center}
   @media print{body{padding:0}.no-print{display:none}}
   </style></head><body>
-  <div class="head"><div><h1>${COMPANY}</h1><div>أنظمة التأريض والحماية من الصواعق</div></div><div class="tag">فاتورة بيع</div></div>
+  <div class="head"><div class="brand-lockup"><img class="company-logo" src="https://i.ibb.co/yB5yr1BD/IMG-5095.jpg" alt="لوجو شركة العربي" onerror="this.style.display='none'"><div><h1>${COMPANY}</h1><div>أنظمة التأريض والحماية من الصواعق</div></div></div><div class="tag">فاتورة بيع</div></div>
   <h2>فاتورة رقم ${escapeHtml(invoice.number)}</h2>
   <div class="meta"><div><b>العميل:</b> ${escapeHtml(invoice.customer)}</div><div><b>الهاتف:</b> ${escapeHtml(invoice.phone || '—')}</div><div><b>تاريخ الفاتورة:</b> ${invoice.date}</div><div><b>تاريخ الاستحقاق:</b> ${escapeHtml(invoice.dueDate || '—')}</div><div><b>حالة السداد:</b> ${invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</div></div>
   <table><thead><tr><th>م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>${invoice.items.map((item,index)=>`<tr><td>${index+1}</td><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td><td>${item.quantity}</td><td>${money(item.price)}</td><td>${money(item.quantity*item.price)}</td></tr>`).join('')}</tbody></table>
