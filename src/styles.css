@@ -1336,3 +1336,153 @@ input, select, textarea {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+
+/* Executive ERP finish — responsive, refined, accessible */
+:root {
+  --brand-navy: #10283f;
+  --brand-deep: #0a1b2b;
+  --brand-blue: #23617e;
+  --brand-gold: #d8b568;
+  --surface: #fff;
+  --page-bg: #f3f6f9;
+  --line: #e1e8ef;
+  --text-primary: #172b3d;
+  --text-secondary: #718096;
+}
+html { scroll-behavior: smooth; }
+body { background-color: var(--page-bg); }
+.app-shell { background: transparent; }
+.sidebar {
+  width: 264px;
+  padding: 27px 17px 20px;
+  background: linear-gradient(165deg, #102b43 0%, #0a1b2b 100%);
+  border-inline-end: 1px solid rgba(255,255,255,.08);
+}
+.brand-mark { width: 52px; height: 52px; margin-bottom: 14px; }
+.brand-name { font-size: 22px; line-height: 1.7; }
+.brand-caption { margin-bottom: 30px; font-size: 8px; letter-spacing: 1.25px; }
+.sidebar nav { gap: 7px; }
+.nav-item {
+  min-height: 47px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+.nav-item:hover { transform: translateX(-2px); }
+.nav-item.active { background: linear-gradient(100deg, rgba(216,181,104,.19), rgba(216,181,104,.045)); }
+.sidebar > .nav-item { margin-top: auto; }
+.sidebar-foot { padding-top: 17px; border-top: 1px solid rgba(255,255,255,.1); }
+.main {
+  width: calc(100% - 264px);
+  margin-inline-start: 264px;
+  padding: 30px clamp(22px, 3vw, 48px);
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  margin: -30px calc(clamp(22px, 3vw, 48px) * -1) 26px;
+  padding: 20px clamp(22px, 3vw, 48px) 18px;
+  background: rgba(243,246,249,.91);
+  border-bottom: 1px solid rgba(220,230,237,.9);
+  backdrop-filter: blur(16px);
+}
+.topbar h1 { font-size: 25px; letter-spacing: -.35px; }
+.today-chip { border-color: #dce5ec; box-shadow: 0 3px 10px rgba(16,42,67,.04); }
+.welcome {
+  position: relative;
+  min-height: 194px;
+  padding: 32px 36px;
+  border-radius: 22px;
+}
+.welcome::after {
+  content: "";
+  position: absolute;
+  width: 250px;
+  height: 250px;
+  border: 1px solid rgba(216,181,104,.18);
+  border-radius: 50%;
+  inset-inline-start: 35%;
+  top: -120px;
+  pointer-events: none;
+}
+.welcome > div:first-child { position: relative; z-index: 1; }
+.welcome h2 { max-width: 700px; line-height: 1.55; }
+.welcome p { max-width: 620px; line-height: 1.9; }
+.welcome-art { position: relative; z-index: 1; }
+.stats-grid { gap: 17px; }
+.stat-card {
+  border-radius: 17px;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(16,42,67,.08); border-color: #cfdae3; }
+.stat-value { font-size: clamp(19px, 1.65vw, 26px); }
+.panel { padding: 24px; }
+.panel-head { padding-bottom: 16px; }
+.panel-head p { line-height: 1.8; }
+.primary-btn, .secondary-btn, .icon-btn { transition: all .18s ease; }
+.primary-btn { box-shadow: 0 5px 12px rgba(16,62,88,.13); }
+.primary-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.secondary-btn:hover { border-color: #b8c9d5; background: #f8fafb; }
+.table-wrap { overflow-x: auto; border-radius: 13px; }
+table { min-width: 620px; }
+table thead th { position: sticky; top: 0; z-index: 1; }
+td { line-height: 1.7; }
+input, select, textarea { min-height: 42px; }
+.modal { border-radius: 21px; box-shadow: 0 30px 100px rgba(5,22,36,.28); }
+.auth-page { background: radial-gradient(circle at 15% 15%, rgba(216,181,104,.16), transparent 30%), linear-gradient(135deg, #0a1b2b, #183f59); }
+.auth-card { border: 1px solid rgba(255,255,255,.55); box-shadow: 0 28px 90px rgba(0,0,0,.24); border-radius: 23px; }
+.auth-mark { background: linear-gradient(145deg, #e6c879, #c89a43); color: #10283f; }
+.footer { margin-inline-start: 264px; }
+@media (min-width: 1500px) {
+  .main { padding-inline: 52px; }
+  .topbar { margin-inline: -52px; padding-inline: 52px; }
+}
+@media (max-width: 900px) {
+  .sidebar { width: 230px; }
+  .main { width: calc(100% - 230px); margin-inline-start: 230px; padding: 22px; }
+  .topbar { margin: -22px -22px 22px; padding: 18px 22px 16px; }
+  .footer { margin-inline-start: 230px; }
+}
+@media (max-width: 700px) {
+  .sidebar { position: relative; width: 100%; padding: 14px 13px 11px; }
+  .brand-mark { width: 39px; height: 39px; margin-bottom: 5px; }
+  .brand-name { font-size: 18px; }
+  .brand-caption { margin: 1px 0 13px; }
+  .sidebar nav { gap: 6px; padding-bottom: 3px; }
+  .nav-item { min-height: 40px; padding: 9px 11px; }
+  .sidebar > .nav-item { margin-top: 10px; }
+  .sidebar-foot { margin-top: 10px; padding-top: 10px; }
+  .main { width: 100%; margin-inline-start: 0; padding: 15px 12px 26px; }
+  .topbar {
+    position: relative; top: auto;
+    margin: -15px -12px 18px; padding: 15px 13px 13px;
+    flex-direction: row; align-items: center; gap: 8px;
+  }
+  .topbar h1 { font-size: 20px; }
+  .eyebrow { font-size: 8px; letter-spacing: .35px; }
+  .today-chip { padding: 8px 9px; font-size: 10px; white-space: nowrap; }
+  .welcome { padding: 20px 16px; min-height: 145px; }
+  .welcome h2 { font-size: 19px; }
+  .welcome p { font-size: 11px; }
+  .welcome-art { width: 60px; height: 60px; border-radius: 17px; }
+  .welcome-art svg { width: 37px; height: 37px; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .stat-card { padding: 13px 11px; }
+  .stat-value { font-size: 17px; }
+  .stat-label { font-size: 11px; }
+  .stat-card small { font-size: 10px; }
+  .panel { padding: 14px 10px; }
+  .panel-head { align-items: flex-start; }
+  .panel-head p { font-size: 11px; }
+  .footer { margin-inline-start: 0; padding: 14px 12px; flex-wrap: wrap; }
+  .form-grid { grid-template-columns: 1fr; gap: 5px; }
+  .modal { padding: 19px 15px; }
+}
+@media (max-width: 380px) {
+  .topbar { align-items: flex-start; flex-direction: column; }
+  .today-chip { align-self: flex-start; }
+  .welcome-art { display: none; }
+}
