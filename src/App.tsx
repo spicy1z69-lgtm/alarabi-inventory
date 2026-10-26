@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
 
@@ -190,6 +190,25 @@ function InventoryApp({ user }: { user: User }) {
   const cashIn = cashEntries.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0)
   const cashOut = cashEntries.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0)
   const cashBalance = cashIn - cashOut
+
+  const exportBackup = () => {
+    const backup = {
+      company: COMPANY,
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      data: { products, quotes, invoices, cashEntries },
+    }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'alarabi-backup-' + today() + '.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    setNotice('تم تجهيز نسخة احتياطية من البيانات الحالية')
+  }
   const addCashEntry = () => {
     const amount = Number(cashAmount)
     if (!Number.isFinite(amount) || amount <= 0 || !cashCategory.trim()) { setNotice('اكتب مبلغ صحيح وحدد البند'); return }
@@ -548,6 +567,18 @@ function InventoryApp({ user }: { user: User }) {
 
               <div className="welcome-art">
                 <Boxes size={70} />
+              </div>
+            </section>
+
+            <section className="panel backup-panel">
+              <div className="panel-head">
+                <div>
+                  <h3>نسخة احتياطية من بيانات الشركة</h3>
+                  <p>احفظ الأصناف وعروض الأسعار والفواتير وحركة الخزنة في ملف JSON على جهازك.</p>
+                </div>
+                <button className="primary-button" onClick={exportBackup}>
+                  <Download size={17} /> تنزيل نسخة احتياطية
+                </button>
               </div>
             </section>
 
