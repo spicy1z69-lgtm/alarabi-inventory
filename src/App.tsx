@@ -518,7 +518,11 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const deleteInvoice = (invoice: Invoice) => {
-    if (!window.confirm(`متأكد إنك عايز تحذف الفاتورة ${invoice.number}؟ سيتم حذفها وإرجاع كمياتها للمخزون.`)) return
+    const linkedPayments = cashEntries.filter(entry => entry.invoiceId === invoice.id)
+    const paymentNote = linkedPayments.length
+      ? ' توجد تحصيلات فعلية مرتبطة بالفاتورة بقيمة ' + money(linkedPayments.reduce((sum, entry) => sum + entry.amount, 0)) + ' وستظل في سجل الخزنة.'
+      : ''
+    if (!window.confirm('متأكد إنك عايز تحذف الفاتورة ' + invoice.number + '؟ سيتم إرجاع كمياتها للمخزون.' + paymentNote)) return
     const returned = new Map<string, number>()
     for (const row of invoice.items || []) {
       returned.set(row.productId, (returned.get(row.productId) || 0) + row.quantity)
@@ -540,11 +544,8 @@ function InventoryApp({ user }: { user: User }) {
       })),
       ...old,
     ])
-    const linkedPayments = cashEntries.filter(entry => entry.invoiceId === invoice.id)
-    if (linkedPayments.length && !window.confirm('الفاتورة مرتبطة بتحصيلات مسجلة بالخزنة بقيمة ' + money(linkedPayments.reduce((sum, entry) => sum + entry.amount, 0)) + '. حذفها سيحذف التحصيلات المرتبطة أيضًا. هل تريد المتابعة؟')) return
-    if (linkedPayments.length) setCashEntries(old => old.filter(entry => entry.invoiceId !== invoice.id))
     setInvoices(old => old.filter(item => item.id !== invoice.id))
-    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون' + (linkedPayments.length ? ' وحذف التحصيلات المرتبطة بها' : ''))
+    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون' + (linkedPayments.length ? ' مع الإبقاء على التحصيلات الفعلية في الخزنة' : ''))
   }
 
   const deleteQuote = (quote: Quote) => {
