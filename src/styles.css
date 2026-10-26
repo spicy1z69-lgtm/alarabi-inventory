@@ -1978,3 +1978,17 @@ input[type="email"], input[type="tel"], input[type="password"], select, textarea
   border-color: #393940 !important;
 }
 .modal-backdrop { background: rgba(0,0,0,.72); }
+
+
+/* Fix white backgrounds behind page headings and product section titles */
+.page-header, .page-title, .page-heading, .content-header, .section-heading,
+.page-header h1, .page-header h2, .page-title h1, .page-title h2,
+.section-title, .section-title h2, .section-title h3,
+.page-header > *, .content-header > * {
+  background-color: transparent !important;
+  color: #f4f4f5 !important;
+}
+.page-header, .page-title, .page-heading, .content-header, .section-heading,
+.section-title {
+  border-color: #303035 !important;
+}
