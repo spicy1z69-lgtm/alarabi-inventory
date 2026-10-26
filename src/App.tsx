@@ -20,6 +20,7 @@ const seed: Product[] = [
     category: 'قضبان التأريض',
     quantity: 12,
     price: 650,
+    costPrice: 0,
     minStock: 3,
   },
   {
@@ -29,6 +30,7 @@ const seed: Product[] = [
     category: 'الحماية من الصواعق',
     quantity: 18,
     price: 1250,
+    costPrice: 0,
     minStock: 5,
   },
   {
@@ -38,6 +40,7 @@ const seed: Product[] = [
     category: 'كابلات التأريض',
     quantity: 4,
     price: 950,
+    costPrice: 0,
     minStock: 2,
   },
   {
@@ -47,6 +50,7 @@ const seed: Product[] = [
     category: 'وصلات ومشابك',
     quantity: 2,
     price: 350,
+    costPrice: 0,
     minStock: 3,
   },
   {
@@ -56,6 +60,7 @@ const seed: Product[] = [
     category: 'غرف التفتيش',
     quantity: 8,
     price: 480,
+    costPrice: 0,
     minStock: 2,
   },
   {
@@ -65,6 +70,7 @@ const seed: Product[] = [
     category: 'مواد التأريض',
     quantity: 10,
     price: 720,
+    costPrice: 0,
     minStock: 3,
   },
 ]
@@ -130,6 +136,7 @@ function InventoryApp({ user }: { user: User }) {
     category: '',
     quantity: '0',
     price: '0',
+    costPrice: '0',
     minStock: '2',
   })
 
@@ -274,6 +281,12 @@ function InventoryApp({ user }: { user: User }) {
   const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
   const unpaidInvoices = invoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
   const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
+  const knownCostSales = invoices.reduce((sum, invoice) => sum + (invoice.items || []).reduce((itemSum, item) => {
+    const product = products.find(p => p.id === item.productId)
+    return itemSum + item.quantity * (product?.costPrice ?? 0)
+  }, 0), 0)
+  const hasMissingCosts = products.some(p => !(p.costPrice && p.costPrice > 0))
+  const estimatedGrossProfit = totalInvoiceSales - knownCostSales
 
   const filtered = useMemo(
     () =>
@@ -294,6 +307,7 @@ function InventoryApp({ user }: { user: User }) {
             category: p.category,
             quantity: String(p.quantity),
             price: String(p.price),
+            costPrice: String(p.costPrice ?? 0),
             minStock: String(p.minStock),
           }
         : {
@@ -302,6 +316,7 @@ function InventoryApp({ user }: { user: User }) {
             category: '',
             quantity: '0',
             price: '0',
+            costPrice: '0',
             minStock: '2',
           }
     )
@@ -324,6 +339,7 @@ function InventoryApp({ user }: { user: User }) {
       category: draft.category.trim() || 'عام',
       quantity: Math.max(0, Number(draft.quantity) || 0),
       price: Math.max(0, Number(draft.price) || 0),
+      costPrice: Math.max(0, Number(draft.costPrice) || 0),
       minStock: Math.max(0, Number(draft.minStock) || 0),
     }
 
@@ -683,6 +699,8 @@ function InventoryApp({ user }: { user: User }) {
               <Stat icon={<CircleDollarSign />} label="المبالغ المحصلة" value={money(totalCollected)} foot={paidInvoiceCount + ' فاتورة مسددة بالكامل'} />
               <Stat icon={<AlertTriangle />} label="مستحقات العملاء" value={money(customerBalances)} foot={unpaidInvoices.length + ' فاتورة عليها رصيد'} warning={customerBalances > 0} />
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
+              <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? 'غير مكتملة: أدخل تكلفة شراء كل صنف' : 'حسب تكلفة الشراء المسجلة'} warning={hasMissingCosts} />
+              <Stat icon={<CircleDollarSign />} label="هامش إجمالي تقديري" value={money(estimatedGrossProfit)} foot={hasMissingCosts ? 'غير نهائي لوجود أصناف بلا تكلفة شراء' : 'المبيعات ناقص تكلفة البضاعة فقط'} warning={hasMissingCosts} />
             </section>
 
             <section className="panel">
@@ -1170,10 +1188,17 @@ function InventoryApp({ user }: { user: User }) {
               />
 
               <Field
-                label="سعر الوحدة (جنيه)"
+                label="سعر البيع للوحدة (جنيه)"
                 type="number"
                 value={draft.price}
                 onChange={v => setDraft({ ...draft, price: v })}
+              />
+
+              <Field
+                label="تكلفة الشراء للوحدة (جنيه)"
+                type="number"
+                value={draft.costPrice}
+                onChange={v => setDraft({ ...draft, costPrice: v })}
               />
 
               <Field
