@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
+import * as XLSX from 'xlsx'
 import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
@@ -1147,8 +1148,13 @@ function InventoryApp({ user }: { user: User }) {
               <button className="primary-btn" onClick={()=>{
                 const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون بسعر التكلفة'];
                 const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
-                const csv='\uFEFFsep=;\r\n'+[headers,...rows].map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\r\n');
-                const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download=(reportKind==='sales'?'alarabi-sales':reportKind==='cash'?'alarabi-cash':'alarabi-inventory')+'-'+today()+'.csv';document.body.appendChild(a);a.click();a.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);setNotice('تم تصدير CSV بترميز عربي وفواصل مناسبة لـ Excel')
+                const sheet=XLSX.utils.aoa_to_sheet([headers,...rows]);
+                sheet['!cols']=headers.map((h,index)=>({wch:Math.min(32,Math.max(14,String(h).length+4,...rows.map(row=>String(row[index]??'').length+2)))}));
+                const workbook=XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook,sheet,reportKind==='sales'?'المبيعات':reportKind==='cash'?'الخزنة':'المخزون');
+                const fileName=(reportKind==='sales'?'alarabi-sales':reportKind==='cash'?'alarabi-cash':'alarabi-inventory')+'-'+today()+'.xlsx';
+                XLSX.writeFile(workbook,fileName,{compression:true});
+                setNotice('تم تصدير ملف Excel بصيغة XLSX بنجاح')
               }}><Download size={16}/> تصدير Excel</button>
               <button className="secondary-btn" onClick={()=>{
                 const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون'];
