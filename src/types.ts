@@ -6,6 +6,7 @@ export interface Product {
   category: string
   quantity: number
   price: number
+  costPrice?: number
   minStock: number
 }
 
