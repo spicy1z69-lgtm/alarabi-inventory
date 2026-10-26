@@ -1022,3 +1022,16 @@ td { border-bottom-color: #edf1f7; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* Invoice management */
+.invoice-stats { margin-top: 4px; }
+.invoice-status-btn { padding: 7px 9px; font-size: 11px; white-space: nowrap; }
+.invoice-summary { margin-top: 18px; padding: 16px; border: 1px solid #e2eaf4; border-radius: 12px; background: #f8faff; }
+.invoice-summary > div { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:8px 0; color:#65738a; font-size:13px; }
+.invoice-summary > div b { color:#1d2c43; }
+.invoice-summary .total-row { border-top:1px solid #dce5f1; margin-top:5px; padding-top:14px; color:#1d2c43; font-size:16px; }
+.invoice-summary .total-row strong { color:#245bdb; font-size:20px; }
+@media(max-width:700px) {
+  .invoice-status-btn { font-size:10px; padding:6px; }
+  .invoice-summary { padding:12px; }
+}
