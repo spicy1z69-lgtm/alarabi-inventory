@@ -99,10 +99,13 @@ const load = <T,>(key: string, fallback: T): T => {
 
 type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string }
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
-type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash'
+type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'reports'
 
 function InventoryApp({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [reportFrom, setReportFrom] = useState('')
+  const [reportTo, setReportTo] = useState('')
+  const [reportKind, setReportKind] = useState<'sales' | 'cash' | 'inventory'>('sales')
   const [cloudLoaded, setCloudLoaded] = useState(false)
   const [cloudError, setCloudError] = useState('')
   const [products, setProducts] = useState<Product[]>(() =>
@@ -289,6 +292,13 @@ function InventoryApp({ user }: { user: User }) {
   )
 
   const lowStock = products.filter(p => p.quantity <= p.minStock)
+  const reportInvoices = invoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
+  const reportCash = cashEntries.filter(e => (!reportFrom || e.date >= reportFrom) && (!reportTo || e.date <= reportTo))
+  const reportSales = reportInvoices.reduce((sum, i) => sum + invoiceTotalFor(i), 0)
+  const reportCollected = reportInvoices.reduce((sum, i) => sum + Math.min(invoiceTotalFor(i), Math.max(0, i.paidAmount || 0)), 0)
+  const reportBalance = reportInvoices.reduce((sum, i) => sum + Math.max(0, invoiceTotalFor(i) - (i.paidAmount || 0)), 0)
+  const reportCashIn = reportCash.filter(e => e.kind === 'in').reduce((sum, e) => sum + e.amount, 0)
+  const reportCashOut = reportCash.filter(e => e.kind === 'out').reduce((sum, e) => sum + e.amount, 0)
   const totalInvoiceSales = invoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
   const totalCollected = invoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
   const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
@@ -705,6 +715,7 @@ function InventoryApp({ user }: { user: User }) {
           </button>
         </nav>
 
+        <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
         <button className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
@@ -726,7 +737,7 @@ function InventoryApp({ user }: { user: User }) {
                 ? 'لوحة التحكم'
                 : tab === 'products'
                   ? 'الأصناف والمخزون'
-                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : 'الفواتير'}
+                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : tab === 'reports' ? 'التقارير والتصدير' : 'الفواتير'}
             </h1>
           </div>
 
@@ -1116,6 +1127,43 @@ function InventoryApp({ user }: { user: User }) {
                 detail="جرّب كلمة بحث مختلفة أو أضف صنفًا جديدًا."
               />
             )}
+          </section>
+        )}
+
+        {tab === 'reports' && (
+          <section className="reports-page" dir="rtl">
+            <div className="panel"><div className="panel-head"><div><h3>مركز التقارير</h3><p>تقارير المبيعات والخزنة والمخزون — كحلي ورمادي ولمسات حمراء.</p></div><span className="muted">AL / DATA</span></div>
+              <div className="report-filters">
+                <label>من تاريخ<input type="date" value={reportFrom} onChange={e=>setReportFrom(e.target.value)} /></label>
+                <label>إلى تاريخ<input type="date" value={reportTo} onChange={e=>setReportTo(e.target.value)} /></label>
+                <label>نوع التقرير<select value={reportKind} onChange={e=>setReportKind(e.target.value as 'sales'|'cash'|'inventory')}><option value="sales">المبيعات والفواتير</option><option value="cash">الخزنة والحركة المالية</option><option value="inventory">الأصناف والمخزون</option></select></label>
+                <button className="secondary-btn" onClick={()=>{setReportFrom('');setReportTo('')}}>مسح الفترة</button>
+              </div>
+            </div>
+            <div className="report-stats">
+              {reportKind==='sales'?<><Stat icon={<Receipt/>} label="إجمالي المبيعات" value={money(reportSales)} foot={reportInvoices.length+' فاتورة'}/><Stat icon={<Wallet/>} label="المحصّل" value={money(reportCollected)} foot="حسب مبالغ السداد المسجلة"/><Stat icon={<AlertTriangle/>} label="المتبقي" value={money(reportBalance)} foot="مستحقات العملاء" warning={reportBalance>0}/></>:reportKind==='cash'?<><Stat icon={<ArrowDownLeft/>} label="مبالغ داخلة" value={money(reportCashIn)} foot="إجمالي الداخل"/><Stat icon={<ArrowUpRight/>} label="مبالغ خارجة" value={money(reportCashOut)} foot="إجمالي الخارج"/><Stat icon={<Wallet/>} label="صافي الحركة" value={money(reportCashIn-reportCashOut)} foot="داخل ناقص خارج"/></>:<><Stat icon={<Package/>} label="عدد الأصناف" value={String(products.length)} foot="الأصناف المسجلة"/><Stat icon={<Boxes/>} label="إجمالي الوحدات" value={String(products.reduce((s,p)=>s+p.quantity,0))} foot="الرصيد الحالي"/><Stat icon={<AlertTriangle/>} label="أصناف منخفضة" value={String(lowStock.length)} foot="عند الحد الأدنى أو أقل" warning={lowStock.length>0}/></>}
+            </div>
+            <div className="panel"><div className="panel-head"><div><h3>{reportKind==='sales'?'تفاصيل الفواتير':reportKind==='cash'?'الحركات المالية':'كشف المخزون'}</h3><p>التصدير يشمل البيانات المحددة أدناه.</p></div><div className="report-actions">
+              <button className="primary-btn" onClick={()=>{
+                const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون بسعر التكلفة'];
+                const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
+                const csv='\uFEFF'+[headers,...rows].map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+                const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));const a=document.createElement('a');a.href=url;a.download=(reportKind==='sales'?'alarabi-sales':reportKind==='cash'?'alarabi-cash':'alarabi-inventory')+'-'+today()+'.csv';a.click();URL.revokeObjectURL(url);setNotice('تم تجهيز ملف CSV يفتح في Excel')
+              }}><Download size={16}/> تصدير Excel</button>
+              <button className="secondary-btn" onClick={()=>{
+                const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون'];
+                const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
+                const title=reportKind==='sales'?'تقرير المبيعات والفواتير':reportKind==='cash'?'تقرير الخزنة والحركة المالية':'تقرير الأصناف والمخزون';
+                const esc=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const table='<table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+                const w=window.open('','_blank');if(!w){setNotice('اسمح بفتح النوافذ المنبثقة لطباعة التقرير');return}
+                w.document.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>'+title+'</title><style>body{font:12px Tahoma,Arial,sans-serif;color:#263746;padding:20px}h1{color:#173653;border-right:5px solid #c83d46;padding-right:12px}.brand{border-bottom:3px solid #c83d46;padding-bottom:12px;margin-bottom:18px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#173653;color:white}th,td{border:1px solid #cfd7df;padding:8px;text-align:right}tr:nth-child(even){background:#f1f4f7}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="brand"><h1>'+title+'</h1><strong>'+COMPANY+'</strong><p>الفترة: '+(reportFrom||'من البداية')+' — '+(reportTo||'حتى اليوم')+' | تاريخ التصدير: '+today()+'</p></div>'+table+'<script>window.onload=()=>window.print()</script></body></html>');w.document.close()
+              }}><Printer size={16}/> طباعة / حفظ PDF</button>
+            </div></div>
+            <div className="table-wrap"><table><thead><tr>{(reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['الكود','الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون']).map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>
+              {reportKind==='sales'?reportInvoices.map(i=><tr key={i.id}><td>{i.date}</td><td>{i.number}</td><td>{i.customer}</td><td>{money(invoiceTotalFor(i))}</td><td>{money(i.paidAmount||0)}</td><td>{money(Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)))}</td><td>{i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة'}</td></tr>):reportKind==='cash'?reportCash.map(e=><tr key={e.id}><td>{e.date}</td><td>{e.kind==='in'?'داخل':'خارج'}</td><td>{e.category}</td><td>{e.note||'—'}</td><td>{money(e.amount)}</td></tr>):products.map(p=><tr key={p.id}><td>{p.code}</td><td>{p.name}</td><td>{p.category}</td><td>{p.quantity}</td><td>{p.minStock}</td><td>{money(p.price)}</td><td>{money(p.costPrice??0)}</td><td>{money(p.quantity*(p.costPrice??0))}</td></tr>)}
+              {reportKind==='sales'&&!reportInvoices.length&&<tr><td colSpan={7}>لا توجد فواتير في الفترة المحددة.</td></tr>}{reportKind==='cash'&&!reportCash.length&&<tr><td colSpan={5}>لا توجد حركات في الفترة المحددة.</td></tr>}{reportKind==='inventory'&&!products.length&&<tr><td colSpan={8}>لا توجد أصناف.</td></tr>}
+            </tbody></table></div></div>
           </section>
         )}
 
