@@ -227,6 +227,11 @@ function InventoryApp({ user }: { user: User }) {
   )
 
   const lowStock = products.filter(p => p.quantity <= p.minStock)
+  const totalInvoiceSales = invoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
+  const totalCollected = invoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
+  const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
+  const unpaidInvoices = invoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
+  const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
 
   const filtered = useMemo(
     () =>
@@ -568,6 +573,13 @@ function InventoryApp({ user }: { user: User }) {
               <div className="welcome-art">
                 <Boxes size={70} />
               </div>
+            </section>
+
+            <section className="stats-grid financial-stats">
+              <Stat icon={<Receipt />} label="إجمالي الفواتير" value={money(totalInvoiceSales)} foot={invoices.length + ' فاتورة مسجلة'} />
+              <Stat icon={<CircleDollarSign />} label="المبالغ المحصلة" value={money(totalCollected)} foot={paidInvoiceCount + ' فاتورة مسددة بالكامل'} />
+              <Stat icon={<AlertTriangle />} label="مستحقات العملاء" value={money(customerBalances)} foot={unpaidInvoices.length + ' فاتورة عليها رصيد'} warning={customerBalances > 0} />
+              <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
             </section>
 
             <section className="panel backup-panel">
