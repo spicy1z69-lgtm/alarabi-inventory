@@ -922,6 +922,36 @@ function InventoryApp({ user }: { user: User }) {
               <span className="muted">{filtered.length} صنف</span>
             </div>
 
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <h3>تقرير حركة المخزون</h3>
+                  <p>ابحث بكود الصنف أو اسمه لمراجعة كل حركاته المسجلة.</p>
+                </div>
+                <span className="muted">{stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).length} حركة</span>
+              </div>
+              {stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).length ? (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>التاريخ</th><th>كود الصنف</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>السبب</th><th>المرجع</th></tr></thead>
+                    <tbody>
+                      {stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).map(movement => (
+                        <tr key={movement.id}>
+                          <td>{movement.date}</td>
+                          <td><code>{products.find(p => p.id === movement.productId)?.code || '—'}</code></td>
+                          <td className="product-cell">{movement.productName}</td>
+                          <td><span className={movement.kind === 'in' ? 'pill success' : 'pill danger'}>{movement.kind === 'in' ? 'دخول' : 'خروج'}</span></td>
+                          <td>{movement.quantity}</td>
+                          <td>{movement.reason}</td>
+                          <td>{movement.reference || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <div className="empty-state">مفيش حركات مخزون مطابقة للبحث ده.</div>}
+            </section>
+
             {filtered.length ? (
               <div className="table-wrap">
                 <table>
