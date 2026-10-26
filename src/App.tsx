@@ -1,6 +1,8 @@
 
 
 import { useEffect, useMemo, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
   Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign,
@@ -86,8 +88,10 @@ const load = <T,>(key: string, fallback: T): T => {
 
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices'
 
-export default function App() {
+function InventoryApp({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [cloudLoaded, setCloudLoaded] = useState(false)
+  const [cloudError, setCloudError] = useState('')
   const [products, setProducts] = useState<Product[]>(() =>
     load('alarabi-products', seed)
   )
@@ -122,16 +126,54 @@ export default function App() {
   })
 
   useEffect(() => {
+    let active = true
+    const loadCloudState = async () => {
+      setCloudLoaded(false)
+      setCloudError('')
+      const { data, error } = await supabase.from('app_state').select('state_key,state_value').eq('owner_id', user.id)
+      if (!active) return
+      if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message); setCloudLoaded(true); return }
+      const values = new Map((data ?? []).map(row => [row.state_key, row.state_value]))
+      const records = [
+        { key: 'products', localKey: 'alarabi-products', fallback: seed, setter: setProducts },
+        { key: 'quotes', localKey: 'alarabi-quotes', fallback: [] as Quote[], setter: setQuotes },
+        { key: 'invoices', localKey: 'alarabi-invoices', fallback: [] as Invoice[], setter: setInvoices },
+      ] as const
+      for (const record of records) {
+        const cloudValue = values.get(record.key)
+        if (cloudValue !== undefined && cloudValue !== null) {
+          record.setter(cloudValue as never)
+          localStorage.setItem(record.localKey, JSON.stringify(cloudValue))
+        } else {
+          const localValue = load(record.localKey, record.fallback)
+          record.setter(localValue as never)
+          const { error: saveError } = await supabase.from('app_state').upsert({ owner_id: user.id, state_key: record.key, state_value: localValue, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' })
+          if (saveError && active) setCloudError('تعذر رفع البيانات الحالية: ' + saveError.message)
+        }
+      }
+      if (active) setCloudLoaded(true)
+    }
+    void loadCloudState()
+    return () => { active = false }
+  }, [user.id])
+
+  useEffect(() => {
+    if (!cloudLoaded) return
     localStorage.setItem('alarabi-products', JSON.stringify(products))
-  }, [products])
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'products', state_value: products, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الأصناف سحابيًا: ' + error.message) })
+  }, [products, cloudLoaded, user.id])
 
   useEffect(() => {
+    if (!cloudLoaded) return
     localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
-  }, [quotes])
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'quotes', state_value: quotes, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ عروض الأسعار سحابيًا: ' + error.message) })
+  }, [quotes, cloudLoaded, user.id])
 
   useEffect(() => {
+    if (!cloudLoaded) return
     localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
-  }, [invoices])
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
+  }, [invoices, cloudLoaded, user.id])
 
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.quantity * p.price,
@@ -375,6 +417,7 @@ export default function App() {
           </button>
         </nav>
 
+        <button className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
           <small>v1.0.0</small>
@@ -382,6 +425,8 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {!cloudLoaded && <div className="notice">جارٍ تحميل بياناتك من السحابة...</div>}
+        {cloudError && <button className="notice" onClick={() => setCloudError('')}>⚠ {cloudError} <X size={15} /></button>}
         <header className="topbar">
           <div>
             <div className="eyebrow">
@@ -1160,4 +1205,41 @@ function invoiceHtml(invoice: Invoice) {
   <div class="totals"><div><span>إجمالي الأصناف</span><b>${money(subtotal)}</b></div><div><span>الخصم</span><b>${money(invoice.discount)}</b></div><div><span>الضريبة (${invoice.tax}%)</span><b>${money(Math.max(0,subtotal-invoice.discount)*invoice.tax/100)}</b></div><div class="grand"><span>الإجمالي النهائي</span><b>${money(total)}</b></div><div><span>المدفوع</span><b>${money(invoice.paidAmount)}</b></div><div><span>المتبقي</span><b>${money(balance)}</b></div></div>
   ${invoice.notes ? `<div class="note"><b>ملاحظات:</b> ${escapeHtml(invoice.notes)}</div>` : ''}
   <div class="foot">شكرًا لتعاملكم مع ${COMPANY}</div><script>window.onload=()=>window.print()</script></body></html>`
+}
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null)
+  const [checking, setChecking] = useState(true)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); setChecking(false) })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user ?? null); setChecking(false) })
+    return () => listener.subscription.unsubscribe()
+  }, [])
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setBusy(true); setMessage('')
+    const result = mode === 'login'
+      ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+      : await supabase.auth.signUp({ email: email.trim(), password })
+    setBusy(false)
+    if (result.error) setMessage(result.error.message)
+    else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
+    else setMessage('تم تسجيل الدخول بنجاح.')
+  }
+  if (checking) return <div className="auth-page"><div className="auth-card">جارٍ التحقق من تسجيل الدخول...</div></div>
+  if (user) return <InventoryApp user={user} />
+  return <div className="auth-page" dir="rtl"><form className="auth-card" onSubmit={submit}>
+    <div className="auth-mark"><Boxes size={30} /></div>
+    <h1>العربي لأنظمة التأريض والحماية من الصواعق</h1>
+    <p>سجّل الدخول للوصول إلى المخزون والفواتير وعروض الأسعار من أي جهاز.</p>
+    <label>البريد الإلكتروني<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
+    <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="6 أحرف على الأقل" /></label>
+    {message && <div className="auth-message">{message}</div>}
+    <button className="primary-btn auth-submit" disabled={busy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
+    <button type="button" className="text-button auth-toggle" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? 'أول مرة؟ أنشئ حسابًا' : 'لديك حساب؟ سجّل الدخول'}</button>
+  </form></div>
 }
