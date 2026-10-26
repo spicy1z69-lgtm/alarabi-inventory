@@ -24,3 +24,18 @@ export interface Quote {
   date: string
   items: QuoteItem[]
 }
+
+export interface Invoice {
+  id: string
+  number: string
+  customer: string
+  phone: string
+  date: string
+  dueDate: string
+  items: QuoteItem[]
+  discount: number
+  tax: number
+  status: 'paid' | 'unpaid' | 'partial'
+  paidAmount: number
+  notes: string
+}
