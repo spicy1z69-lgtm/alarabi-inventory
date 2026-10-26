@@ -16,6 +16,7 @@ export interface QuoteItem {
   code: string
   quantity: number
   price: number
+  costPrice?: number
 }
 
 export interface Quote {
