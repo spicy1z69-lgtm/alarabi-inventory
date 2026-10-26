@@ -88,6 +88,7 @@ const load = <T,>(key: string, fallback: T): T => {
 }
 
 type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string }
+type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string }
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash'
 
 function InventoryApp({ user }: { user: User }) {
@@ -102,6 +103,7 @@ function InventoryApp({ user }: { user: User }) {
   )
   const [invoices, setInvoices] = useState<Invoice[]>(() => load('alarabi-invoices', []))
   const [cashEntries, setCashEntries] = useState<CashEntry[]>(() => load('alarabi-cash', []))
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => load('alarabi-stock-movements', []))
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
   const [cashAmount, setCashAmount] = useState('')
@@ -145,6 +147,7 @@ function InventoryApp({ user }: { user: User }) {
         { key: 'quotes', localKey: 'alarabi-quotes', fallback: [] as Quote[], setter: setQuotes },
         { key: 'invoices', localKey: 'alarabi-invoices', fallback: [] as Invoice[], setter: setInvoices },
         { key: 'cash', localKey: 'alarabi-cash', fallback: [] as CashEntry[], setter: setCashEntries },
+        { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: [] as StockMovement[], setter: setStockMovements },
       ] as const
       for (const record of records) {
         const cloudValue = values.get(record.key)
@@ -251,6 +254,12 @@ function InventoryApp({ user }: { user: User }) {
     if (!window.confirm('حذف حركة الخزنة بقيمة ' + money(entry.amount) + '؟')) return
     setCashEntries(old => old.filter(e => e.id !== entry.id))
   }
+
+  useEffect(() => {
+    if (!cloudLoaded) return
+    localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'stock-movements', state_value: stockMovements, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل حركة المخزون: ' + error.message) })
+  }, [stockMovements, cloudLoaded, user.id])
 
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.quantity * p.price,
@@ -422,6 +431,13 @@ function InventoryApp({ user }: { user: User }) {
       ...product,
       quantity: product.quantity - (quantitiesByProduct.get(product.id) || 0),
     })))
+    setStockMovements(old => [
+      ...Array.from(quantitiesByProduct.entries()).map(([productId, quantity]) => {
+        const product = products.find(item => item.id === productId)!
+        return { id: crypto.randomUUID(), productId, productName: product.name, kind: 'out' as const, quantity, reason: 'بيع بفاتورة', reference: invoice.number, date: today() }
+      }),
+      ...old,
+    ])
     setInvoices(old => [invoice, ...old])
     setInvoiceModal(false)
     setTab('invoices')
@@ -439,6 +455,19 @@ function InventoryApp({ user }: { user: User }) {
       ...product,
       quantity: product.quantity + (returned.get(product.id) || 0),
     })))
+    setStockMovements(old => [
+      ...Array.from(returned.entries()).map(([productId, quantity]) => ({
+        id: crypto.randomUUID(),
+        productId,
+        productName: invoice.items.find(row => row.productId === productId)?.name || products.find(product => product.id === productId)?.name || 'صنف',
+        kind: 'in' as const,
+        quantity,
+        reason: 'إرجاع عند حذف فاتورة',
+        reference: invoice.number,
+        date: today(),
+      })),
+      ...old,
+    ])
     setInvoices(old => old.filter(item => item.id !== invoice.id))
     setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون')
   }
