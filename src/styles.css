@@ -1951,3 +1951,30 @@ hr, .divider { border-color: #303035; }
 .stat-icon, .quote-icon, .empty-icon { background-color: #35171b; color: #ff6874; }
 .text-button { color: #ff6874; }
 .text-button:hover, .icon-btn:hover { background-color: #2b191c; border-color: #e11d2e; }
+
+
+/* Final pass: remove remaining white/light legacy surfaces */
+:root { color-scheme: dark; }
+* { scrollbar-color: #45454d #0b0b0d; }
+button, .btn, [role="button"] { color: inherit; }
+.card, .dashboard-card, .summary-card, .content-card, .form-card,
+.product-card, .invoice-card, .quote-card, .list-card, .empty-state,
+.toolbar, .filter-bar, .search-panel, .table-container, .table-responsive,
+thead, .tabs, .tab, .nav-item, .dropdown-menu, .select-menu {
+  background-color: #151518;
+  border-color: #303035;
+  color: #f4f4f5;
+}
+.badge, .tag, .status-badge {
+  background-color: #202024;
+  border-color: #393940;
+  color: #e4e4e7;
+}
+input[type="date"], input[type="number"], input[type="text"], input[type="search"],
+input[type="email"], input[type="tel"], input[type="password"], select, textarea {
+  color-scheme: dark;
+  background: #202024 !important;
+  color: #f4f4f5 !important;
+  border-color: #393940 !important;
+}
+.modal-backdrop { background: rgba(0,0,0,.72); }
