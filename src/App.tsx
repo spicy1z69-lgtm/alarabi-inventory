@@ -1,6 +1,7 @@
 
 
 import { useEffect, useMemo, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import {
@@ -209,6 +210,36 @@ function InventoryApp({ user }: { user: User }) {
     URL.revokeObjectURL(url)
     setNotice('تم تجهيز نسخة احتياطية من البيانات الحالية')
   }
+  const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const parsed = JSON.parse(await file.text())
+      const data = parsed?.data
+      if (
+        !data ||
+        !Array.isArray(data.products) ||
+        !Array.isArray(data.quotes) ||
+        !Array.isArray(data.invoices) ||
+        !Array.isArray(data.cashEntries)
+      ) {
+        setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
+        return
+      }
+      const confirmed = window.confirm('تنبيه: استرجاع النسخة سيستبدل بيانات الأصناف وعروض الأسعار والفواتير والخزنة الحالية. هل حفظت نسخة من البيانات الحالية وتريد المتابعة؟')
+      if (!confirmed) return
+      setProducts(data.products)
+      setQuotes(data.quotes)
+      setInvoices(data.invoices)
+      setCashEntries(data.cashEntries)
+      setNotice('تم تحميل النسخة الاحتياطية. جاري حفظ البيانات')
+    } catch {
+      setNotice('تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح بصيغة JSON')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
   const addCashEntry = () => {
     const amount = Number(cashAmount)
     if (!Number.isFinite(amount) || amount <= 0 || !cashCategory.trim()) { setNotice('اكتب مبلغ صحيح وحدد البند'); return }
@@ -586,11 +617,17 @@ function InventoryApp({ user }: { user: User }) {
               <div className="panel-head">
                 <div>
                   <h3>نسخة احتياطية من بيانات الشركة</h3>
-                  <p>احفظ الأصناف وعروض الأسعار والفواتير وحركة الخزنة في ملف JSON على جهازك.</p>
+                  <p>نزّل نسخة من الأصناف وعروض الأسعار والفواتير والخزنة، أو استرجع ملفًا سابقًا. الاسترجاع يستبدل البيانات الحالية.</p>
                 </div>
-                <button className="primary-button" onClick={exportBackup}>
-                  <Download size={17} /> تنزيل نسخة احتياطية
-                </button>
+                <div className="backup-actions">
+                  <button className="primary-button" onClick={exportBackup}>
+                    <Download size={17} /> تنزيل نسخة احتياطية
+                  </button>
+                  <button className="secondary-button" onClick={() => document.getElementById('backup-restore-input')?.click()}>
+                    استرجاع نسخة
+                  </button>
+                  <input id="backup-restore-input" type="file" accept=".json,application/json" hidden onChange={restoreBackup} />
+                </div>
               </div>
             </section>
 
