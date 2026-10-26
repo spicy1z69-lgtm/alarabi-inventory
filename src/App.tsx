@@ -441,6 +441,14 @@ function InventoryApp({ user }: { user: User }) {
             <FileText size={19} /> عروض الأسعار
             <span className="nav-count">{quotes.length}</span>
           </button>
+
+          <button
+            className={tab === 'invoices' ? 'nav-item active' : 'nav-item'}
+            onClick={() => setTab('invoices')}
+          >
+            <Receipt size={19} /> الفواتير
+            <span className="nav-count">{invoices.length}</span>
+          </button>
         </nav>
 
         <button className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
