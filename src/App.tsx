@@ -98,7 +98,7 @@ const load = <T,>(key: string, fallback: T): T => {
 }
 
 type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string }
-type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string }
+type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash'
 
 function InventoryApp({ user }: { user: User }) {
@@ -149,6 +149,9 @@ function InventoryApp({ user }: { user: User }) {
   const [movementQuantity, setMovementQuantity] = useState('')
   const [movementReason, setMovementReason] = useState('')
   const [movementReference, setMovementReference] = useState('')
+  const [movementKindFilter, setMovementKindFilter] = useState<'all' | 'in' | 'out'>('all')
+  const [movementFromDate, setMovementFromDate] = useState('')
+  const [movementToDate, setMovementToDate] = useState('')
 
   useEffect(() => {
     let active = true
@@ -392,7 +395,9 @@ function InventoryApp({ user }: { user: User }) {
     }
     if (!movementReason.trim()) { setNotice('اكتب سبب الحركة'); return }
     const delta = movementKind === 'in' ? quantity : -quantity
-    setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: item.quantity + delta } : item))
+    const quantityBefore = product.quantity
+    const quantityAfter = quantityBefore + delta
+    setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: quantityAfter } : item))
     setStockMovements(old => [{
       id: crypto.randomUUID(),
       productId: product.id,
@@ -402,6 +407,8 @@ function InventoryApp({ user }: { user: User }) {
       reason: movementReason.trim(),
       reference: movementReference.trim() || 'حركة يدوية',
       date: today(),
+      quantityBefore,
+      quantityAfter,
     }, ...old])
     setStockMovementModal(false)
     setNotice(movementKind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الرصيد' : 'تم تسجيل خروج البضاعة وتحديث الرصيد')
@@ -514,7 +521,8 @@ function InventoryApp({ user }: { user: User }) {
     setStockMovements(old => [
       ...Array.from(quantitiesByProduct.entries()).map(([productId, quantity]) => {
         const product = products.find(item => item.id === productId)!
-        return { id: crypto.randomUUID(), productId, productName: product.name, kind: 'out' as const, quantity, reason: 'بيع بفاتورة', reference: invoice.number, date: today() }
+        const quantityBefore = product.quantity
+        return { id: crypto.randomUUID(), productId, productName: product.name, kind: 'out' as const, quantity, reason: 'بيع بفاتورة', reference: invoice.number, date: today(), quantityBefore, quantityAfter: quantityBefore - quantity }
       }),
       ...old,
     ])
@@ -540,16 +548,21 @@ function InventoryApp({ user }: { user: User }) {
       quantity: product.quantity + (returned.get(product.id) || 0),
     })))
     setStockMovements(old => [
-      ...Array.from(returned.entries()).map(([productId, quantity]) => ({
-        id: crypto.randomUUID(),
-        productId,
-        productName: invoice.items.find(row => row.productId === productId)?.name || products.find(product => product.id === productId)?.name || 'صنف',
-        kind: 'in' as const,
-        quantity,
-        reason: 'إرجاع عند حذف فاتورة',
-        reference: invoice.number,
-        date: today(),
-      })),
+      ...Array.from(returned.entries()).map(([productId, quantity]) => {
+        const product = products.find(item => item.id === productId)
+        const quantityBefore = product?.quantity
+        return {
+          id: crypto.randomUUID(),
+          productId,
+          productName: invoice.items.find(row => row.productId === productId)?.name || product?.name || 'صنف',
+          kind: 'in' as const,
+          quantity,
+          reason: 'إرجاع عند حذف فاتورة',
+          reference: invoice.number,
+          date: today(),
+          ...(quantityBefore !== undefined ? { quantityBefore, quantityAfter: quantityBefore + quantity } : {}),
+        }
+      }),
       ...old,
     ])
     setInvoices(old => old.filter(item => item.id !== invoice.id))
@@ -1001,22 +1014,34 @@ function InventoryApp({ user }: { user: User }) {
               <div className="panel-head">
                 <div>
                   <h3>تقرير حركة المخزون</h3>
-                  <p>ابحث بكود الصنف أو اسمه لمراجعة كل حركاته المسجلة.</p>
+                  <p>ابحث بكود الصنف أو اسمه، وحدد نوع الحركة والفترة الزمنية لمراجعة السجل.</p>
                 </div>
-                <span className="muted">{stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).length} حركة</span>
+                <span className="muted">{stockMovements.filter(m => (!query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())) && (movementKindFilter === 'all' || m.kind === movementKindFilter) && (!movementFromDate || m.date >= movementFromDate) && (!movementToDate || m.date <= movementToDate)).length} حركة</span>
               </div>
-              {stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).length ? (
+              <div className="form-grid" style={{ marginBottom: 16 }}>
+                <label className="field"><span>نوع الحركة</span>
+                  <select value={movementKindFilter} onChange={e => setMovementKindFilter(e.target.value as 'all' | 'in' | 'out')}>
+                    <option value="all">كل الحركات</option><option value="in">دخول فقط</option><option value="out">خروج فقط</option>
+                  </select>
+                </label>
+                <label className="field"><span>من تاريخ</span><input type="date" value={movementFromDate} onChange={e => setMovementFromDate(e.target.value)} /></label>
+                <label className="field"><span>إلى تاريخ</span><input type="date" value={movementToDate} onChange={e => setMovementToDate(e.target.value)} /></label>
+                <div style={{ display: 'flex', alignItems: 'end' }}><button className="secondary-btn" onClick={() => { setMovementKindFilter('all'); setMovementFromDate(''); setMovementToDate('') }}>مسح الفلاتر</button></div>
+              </div>
+              {stockMovements.filter(m => (!query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())) && (movementKindFilter === 'all' || m.kind === movementKindFilter) && (!movementFromDate || m.date >= movementFromDate) && (!movementToDate || m.date <= movementToDate)).length ? (
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>التاريخ</th><th>كود الصنف</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>السبب</th><th>المرجع</th></tr></thead>
+                    <thead><tr><th>التاريخ</th><th>كود الصنف</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>الرصيد قبل</th><th>الرصيد بعد</th><th>السبب</th><th>المرجع</th></tr></thead>
                     <tbody>
-                      {stockMovements.filter(m => !query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())).map(movement => (
+                      {stockMovements.filter(m => (!query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())) && (movementKindFilter === 'all' || m.kind === movementKindFilter) && (!movementFromDate || m.date >= movementFromDate) && (!movementToDate || m.date <= movementToDate)).map(movement => (
                         <tr key={movement.id}>
                           <td>{movement.date}</td>
                           <td><code>{products.find(p => p.id === movement.productId)?.code || '—'}</code></td>
                           <td className="product-cell">{movement.productName}</td>
                           <td><span className={movement.kind === 'in' ? 'pill success' : 'pill danger'}>{movement.kind === 'in' ? 'دخول' : 'خروج'}</span></td>
                           <td>{movement.quantity}</td>
+                          <td>{movement.quantityBefore ?? '—'}</td>
+                          <td>{movement.quantityAfter ?? '—'}</td>
                           <td>{movement.reason}</td>
                           <td>{movement.reference || '—'}</td>
                         </tr>
@@ -1024,7 +1049,7 @@ function InventoryApp({ user }: { user: User }) {
                     </tbody>
                   </table>
                 </div>
-              ) : <div className="empty-state">مفيش حركات مخزون مطابقة للبحث ده.</div>}
+              ) : <div className="empty-state">مفيش حركات مخزون مطابقة للفلاتر والبحث.</div>}
             </section>
 
             {filtered.length ? (
