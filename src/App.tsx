@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
 
@@ -86,7 +86,8 @@ const load = <T,>(key: string, fallback: T): T => {
   }
 }
 
-type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices'
+type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string }
+type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash'
 
 function InventoryApp({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>('dashboard')
@@ -98,9 +99,13 @@ function InventoryApp({ user }: { user: User }) {
   const [quotes, setQuotes] = useState<Quote[]>(() =>
     load('alarabi-quotes', [])
   )
-  const [invoices, setInvoices] = useState<Invoice[]>(() =>
-    load('alarabi-invoices', [])
-  )
+  const [invoices, setInvoices] = useState<Invoice[]>(() => load('alarabi-invoices', []))
+  const [cashEntries, setCashEntries] = useState<CashEntry[]>(() => load('alarabi-cash', []))
+  const [cashModal, setCashModal] = useState(false)
+  const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
+  const [cashAmount, setCashAmount] = useState('')
+  const [cashCategory, setCashCategory] = useState('')
+  const [cashNote, setCashNote] = useState('')
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [invoiceCustomer, setInvoiceCustomer] = useState('')
   const [invoicePhone, setInvoicePhone] = useState('')
@@ -138,6 +143,7 @@ function InventoryApp({ user }: { user: User }) {
         { key: 'products', localKey: 'alarabi-products', fallback: seed, setter: setProducts },
         { key: 'quotes', localKey: 'alarabi-quotes', fallback: [] as Quote[], setter: setQuotes },
         { key: 'invoices', localKey: 'alarabi-invoices', fallback: [] as Invoice[], setter: setInvoices },
+        { key: 'cash', localKey: 'alarabi-cash', fallback: [] as CashEntry[], setter: setCashEntries },
       ] as const
       for (const record of records) {
         const cloudValue = values.get(record.key)
@@ -174,6 +180,27 @@ function InventoryApp({ user }: { user: User }) {
     localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
   }, [invoices, cloudLoaded, user.id])
+
+  useEffect(() => {
+    if (!cloudLoaded) return
+    localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
+  }, [cashEntries, cloudLoaded, user.id])
+
+  const cashIn = cashEntries.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0)
+  const cashOut = cashEntries.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0)
+  const cashBalance = cashIn - cashOut
+  const addCashEntry = () => {
+    const amount = Number(cashAmount)
+    if (!Number.isFinite(amount) || amount <= 0 || !cashCategory.trim()) { setNotice('اكتب مبلغ صحيح وحدد البند'); return }
+    setCashEntries(old => [{ id: crypto.randomUUID(), kind: cashKind, amount, category: cashCategory.trim(), note: cashNote.trim(), date: today() }, ...old])
+    setCashAmount(''); setCashCategory(''); setCashNote(''); setCashModal(false)
+    setNotice(cashKind === 'in' ? 'تم تسجيل المبلغ الداخل' : 'تم تسجيل المبلغ الخارج')
+  }
+  const deleteCashEntry = (entry: CashEntry) => {
+    if (!window.confirm('حذف حركة الخزنة بقيمة ' + money(entry.amount) + '؟')) return
+    setCashEntries(old => old.filter(e => e.id !== entry.id))
+  }
 
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.quantity * p.price,
@@ -454,6 +481,8 @@ function InventoryApp({ user }: { user: User }) {
             <span className="nav-count">{quotes.length}</span>
           </button>
 
+          <button className={tab === 'cash' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('cash')}><Wallet size={19} /> الخزنة والحركة المالية</button>
+
           <button
             className={tab === 'invoices' ? 'nav-item active' : 'nav-item'}
             onClick={() => setTab('invoices')}
@@ -484,7 +513,7 @@ function InventoryApp({ user }: { user: User }) {
                 ? 'لوحة التحكم'
                 : tab === 'products'
                   ? 'الأصناف والمخزون'
-                  : tab === 'quotes' ? 'عروض الأسعار' : 'الفواتير'}
+                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : 'الفواتير'}
             </h1>
           </div>
 
@@ -661,6 +690,20 @@ function InventoryApp({ user }: { user: User }) {
                   detail="ابدأ بإنشاء أول عرض سعر لعميلك."
                 />
               )}
+            </section>
+          </>
+        )}
+
+        {tab === 'cash' && (
+          <>
+            <section className="stats-grid">
+              <Stat icon={<ArrowDownLeft />} label="إجمالي المبالغ الداخلة" value={money(cashIn)} foot="كل المقبوضات المسجلة" />
+              <Stat icon={<ArrowUpRight />} label="إجمالي المبالغ الخارجة" value={money(cashOut)} foot="كل المصروفات المسجلة" warning={cashOut > cashIn} />
+              <Stat icon={<Wallet />} label="صافي الخزنة" value={money(cashBalance)} foot="الداخل ناقص الخارج" warning={cashBalance < 0} />
+              <Stat icon={<ClipboardList />} label="عدد الحركات" value={String(cashEntries.length)} foot="حركة مالية مسجلة" />
+            </section>
+            <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
+            {cashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{cashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td><button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1078,6 +1121,10 @@ function InventoryApp({ user }: { user: User }) {
             <div className="modal-actions"><button className="secondary-btn" onClick={() => setInvoiceModal(false)}>إلغاء</button><button className="primary-btn" onClick={saveInvoice}><Check size={17} /> حفظ الفاتورة</button></div>
           </section>
         </div>
+      )}
+
+      {cashModal && (
+        <div className="modal-backdrop" onClick={() => setCashModal(false)}><section className="modal" onClick={e => e.stopPropagation()}><div className="modal-head"><div><h2>تسجيل حركة مالية</h2><p>سجّل المقبوضات والمصروفات</p></div><button className="icon-btn" onClick={() => setCashModal(false)}><X /></button></div><div className="form-grid"><label className="field"><span>نوع الحركة</span><select value={cashKind} onChange={e => setCashKind(e.target.value as 'in' | 'out')}><option value="in">مبلغ داخل (قبض)</option><option value="out">مبلغ خارج (مصروف)</option></select></label><Field label="المبلغ بالجنيه *" type="number" value={cashAmount} onChange={setCashAmount} placeholder="0.00" /><Field label="البند *" value={cashCategory} onChange={setCashCategory} placeholder="مثال: تحصيل عميل أو مصروف نقل" /><Field label="ملاحظات" value={cashNote} onChange={setCashNote} placeholder="تفاصيل إضافية (اختياري)" /></div><div className="modal-actions"><button className="secondary-btn" onClick={() => setCashModal(false)}>إلغاء</button><button className="primary-btn" onClick={addCashEntry}><Check size={17} /> حفظ الحركة</button></div></section></div>
       )}
 
       <footer className="footer">
