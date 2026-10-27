@@ -101,9 +101,11 @@ const load = <T,>(key: string, fallback: T): T => {
   }
 }
 
-type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string }
+type SupplierDebtPayment = { id: string; amount: number; date: string; note: string }
+type SupplierDebt = { id: string; supplier: string; phone: string; reference: string; description: string; amount: number; date: string; dueDate: string; payments: SupplierDebtPayment[] }
+type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string; supplierDebtPaymentId?: string }
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
-type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'reports'
+type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'debts' | 'reports'
 
 type AppUser = Pick<User, 'id'>
 
@@ -169,6 +171,18 @@ function InventoryApp({ user }: { user: AppUser }) {
   )
   const [invoices, setInvoices] = useState<Invoice[]>(() => [])
   const [cashEntries, setCashEntries] = useState<CashEntry[]>(() => [])
+  const [supplierDebts, setSupplierDebts] = useState<SupplierDebt[]>([])
+  const [debtSupplier, setDebtSupplier] = useState('')
+  const [debtPhone, setDebtPhone] = useState('')
+  const [debtReference, setDebtReference] = useState('')
+  const [debtDescription, setDebtDescription] = useState('')
+  const [debtAmount, setDebtAmount] = useState('')
+  const [debtDate, setDebtDate] = useState(today())
+  const [debtDueDate, setDebtDueDate] = useState('')
+  const [payingDebtId, setPayingDebtId] = useState('')
+  const [debtPaymentAmount, setDebtPaymentAmount] = useState('')
+  const [debtPaymentNote, setDebtPaymentNote] = useState('')
+  const [debtSearch, setDebtSearch] = useState('')
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => [])
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
@@ -227,6 +241,7 @@ function InventoryApp({ user }: { user: AppUser }) {
           setQuotes((localValues.get('quotes') as Quote[] | undefined) ?? [])
           setInvoices((localValues.get('invoices') as Invoice[] | undefined) ?? [])
           setCashEntries((localValues.get('cash') as CashEntry[] | undefined) ?? [])
+          setSupplierDebts((localValues.get('supplier-debts') as SupplierDebt[] | undefined) ?? [])
           setStockMovements((localValues.get('stock-movements') as StockMovement[] | undefined) ?? [])
           setCloudLoaded(true)
         } catch {
@@ -247,6 +262,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         { key: 'quotes', localKey: 'alarabi-quotes', fallback: isOwnerAccount ? load('alarabi-quotes', []) : [] as Quote[], setter: setQuotes },
         { key: 'invoices', localKey: 'alarabi-invoices', fallback: isOwnerAccount ? load('alarabi-invoices', []) : [] as Invoice[], setter: setInvoices },
         { key: 'cash', localKey: 'alarabi-cash', fallback: isOwnerAccount ? load('alarabi-cash', []) : [] as CashEntry[], setter: setCashEntries },
+        { key: 'supplier-debts', localKey: 'alarabi-supplier-debts', fallback: isOwnerAccount ? load('alarabi-supplier-debts', []) : [] as SupplierDebt[], setter: setSupplierDebts },
         { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: isOwnerAccount ? load('alarabi-stock-movements', []) : [] as StockMovement[], setter: setStockMovements },
       ] as const
       for (const record of records) {
@@ -309,6 +325,40 @@ function InventoryApp({ user }: { user: AppUser }) {
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
   }, [cashEntries, cloudLoaded, user.id])
 
+  useEffect(() => {
+    if (!cloudLoaded) return
+    if (isDesktopApp()) { void writeDesktopState('supplier-debts', supplierDebts).catch(() => setCloudError('تعذر حفظ ديون الموردين محليًا.')); return }
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-supplier-debts', JSON.stringify(supplierDebts))
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'supplier-debts', state_value: supplierDebts, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ ديون الموردين: ' + error.message) })
+  }, [supplierDebts, cloudLoaded, user.id])
+
+  const debtPaid = (debt: SupplierDebt) => (debt.payments || []).reduce((sum, payment) => sum + payment.amount, 0)
+  const debtRemaining = (debt: SupplierDebt) => Math.max(0, debt.amount - debtPaid(debt))
+  const filteredSupplierDebts = supplierDebts.filter(debt => (debt.supplier + ' ' + debt.phone + ' ' + debt.reference + ' ' + debt.description).toLowerCase().includes(debtSearch.trim().toLowerCase()))
+  const overdueSupplierDebts = supplierDebts.filter(debt => debtRemaining(debt) > 0 && debt.dueDate && debt.dueDate < today())
+  const addSupplierDebt = () => {
+    const amount = Number(debtAmount)
+    if (!debtSupplier.trim() || !Number.isFinite(amount) || amount <= 0 || !debtDate || !debtDueDate) { setNotice('اكتب اسم المورد والمبلغ وتاريخ الدين وموعد السداد بشكل صحيح'); return }
+    setSupplierDebts(old => [{ id: crypto.randomUUID(), supplier: debtSupplier.trim(), phone: debtPhone.trim(), reference: debtReference.trim(), description: debtDescription.trim(), amount, date: debtDate, dueDate: debtDueDate, payments: [] }, ...old])
+    setDebtSupplier(''); setDebtPhone(''); setDebtReference(''); setDebtDescription(''); setDebtAmount(''); setDebtDate(today()); setDebtDueDate('')
+    setNotice('تم تسجيل دين المورد وحفظه في السجل')
+  }
+  const recordSupplierDebtPayment = () => {
+    const debt = supplierDebts.find(item => item.id === payingDebtId); const amount = Number(debtPaymentAmount)
+    if (!debt || !Number.isFinite(amount) || amount <= 0 || amount > debtRemaining(debt)) { setNotice('اكتب مبلغ سداد صحيح لا يتجاوز المتبقي'); return }
+    const paymentId = crypto.randomUUID(); const payment = { id: paymentId, amount, date: today(), note: debtPaymentNote.trim() }
+    setSupplierDebts(old => old.map(item => item.id === debt.id ? { ...item, payments: [...(item.payments || []), payment] } : item))
+    setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount, category: 'سداد دين مورد', note: `${debt.supplier}${debt.reference ? ' — ' + debt.reference : ''}${debtPaymentNote.trim() ? ' — ' + debtPaymentNote.trim() : ''}`, date: today(), supplierDebtPaymentId: paymentId }, ...old])
+    setPayingDebtId(''); setDebtPaymentAmount(''); setDebtPaymentNote(''); setNotice('تم تسجيل السداد مرة واحدة وربطه بالخزنة ودين المورد')
+  }
+  const printSupplierDebtStatement = (debt: SupplierDebt) => {
+    const esc = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')
+    const rows = (debt.payments || []).map(payment => `<tr><td>${esc(payment.date)}</td><td>سداد</td><td>${esc(payment.note || '—')}</td><td>${money(payment.amount)}</td></tr>`).join('')
+    const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>كشف حساب مورد - ${esc(debt.supplier)}</title><style>body{font:13px Tahoma,Arial;color:#253746;padding:24px}h1{color:#173653}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #d9e2e9;padding:9px;text-align:right}th{background:#173653;color:white}.summary{padding:14px;background:#eef4f8;margin:16px 0}@page{size:A4;margin:14mm}</style></head><body><h1>العربي لأنظمة التأريض</h1><h2>كشف حساب مورد</h2><p>المورد: ${esc(debt.supplier)} | الهاتف: ${esc(debt.phone || '—')}</p><p>مرجع الدين: ${esc(debt.reference || '—')} | البيان: ${esc(debt.description || '—')}</p><div class="summary">قيمة الدين: ${money(debt.amount)} — المدفوع: ${money(debtPaid(debt))} — المتبقي: ${money(debtRemaining(debt))}<br>تاريخ التسجيل: ${esc(debt.date)} — موعد السداد: ${esc(debt.dueDate)}</div><table><thead><tr><th>التاريخ</th><th>الحركة</th><th>ملاحظات</th><th>المبلغ</th></tr></thead><tbody><tr><td>${esc(debt.date)}</td><td>تسجيل الدين</td><td>${esc(debt.description || debt.reference || '—')}</td><td>${money(debt.amount)}</td></tr>${rows}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`
+    const win = window.open('', '_blank'); if (!win) { setNotice('اسمح بفتح النوافذ المنبثقة لطباعة كشف الحساب'); return }
+    win.document.write(html); win.document.close()
+  }
+
   const cashIn = cashEntries.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0)
   const cashOut = cashEntries.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0)
   const cashBalance = cashIn - cashOut
@@ -318,7 +368,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       company: COMPANY,
       exportedAt: new Date().toISOString(),
       version: 1,
-      data: { products, quotes, invoices, cashEntries, stockMovements },
+      data: { products, quotes, invoices, cashEntries, stockMovements, supplierDebts },
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -343,7 +393,8 @@ function InventoryApp({ user }: { user: AppUser }) {
         !Array.isArray(data.quotes) ||
         !Array.isArray(data.invoices) ||
         !Array.isArray(data.cashEntries) ||
-        (data.stockMovements !== undefined && !Array.isArray(data.stockMovements))
+        (data.stockMovements !== undefined && !Array.isArray(data.stockMovements)) ||
+        (data.supplierDebts !== undefined && !Array.isArray(data.supplierDebts))
       ) {
         setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
         return
@@ -355,6 +406,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       setInvoices(data.invoices)
       setCashEntries(data.cashEntries)
       setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : [])
+      setSupplierDebts(Array.isArray(data.supplierDebts) ? data.supplierDebts : [])
       setNotice('تم تحميل النسخة الاحتياطية. جاري حفظ البيانات')
     } catch {
       setNotice('تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح بصيغة JSON')
@@ -953,6 +1005,7 @@ function InventoryApp({ user }: { user: AppUser }) {
           </button>
 
           <button className={tab === 'cash' ? 'nav-item active' : 'nav-item'} data-tutorial-target="cash" onClick={() => setTab('cash')}><Wallet size={19} /> الخزنة والحركة المالية</button>
+          <button className={tab === 'debts' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('debts')}><CircleDollarSign size={19} /> ديون الموردين {overdueSupplierDebts.length > 0 && <span className="nav-count">{overdueSupplierDebts.length}</span>}</button>
 
           <button
             className={tab === 'invoices' ? 'nav-item active' : 'nav-item'} data-tutorial-target="invoices"
@@ -1003,7 +1056,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 ? 'لوحة التحكم'
                 : tab === 'products'
                   ? 'الأصناف والمخزون'
-                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : tab === 'reports' ? 'التقارير والتصدير' : 'الفواتير'}
+                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : tab === 'debts' ? 'ديون الموردين' : tab === 'reports' ? 'التقارير والتصدير' : 'الفواتير'}
             </h1>
           </div>
 
@@ -1292,7 +1345,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             </section>
             <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
             <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث بالبند أو الملاحظات أو التاريخ أو المبلغ..." /></label><span className="muted">{filteredCashEntries.length} حركة</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
-            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
+            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : entry.supplierDebtPaymentId ? <span className="muted">مرتبطة بسداد دين</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1445,6 +1498,46 @@ function InventoryApp({ user }: { user: AppUser }) {
               />
             )}
           </section>
+        )}
+
+
+        {tab === 'debts' && (
+          <>
+            <section className="stats-grid">
+              <Stat icon={<CircleDollarSign />} label="إجمالي الديون" value={money(supplierDebts.reduce((sum, debt) => sum + debt.amount, 0))} foot="إجمالي المبالغ المسجلة للموردين" />
+              <Stat icon={<Wallet />} label="إجمالي المسدد" value={money(supplierDebts.reduce((sum, debt) => sum + debtPaid(debt), 0))} foot="مدفوعات مسجلة ومربوطة بالخزنة" />
+              <Stat icon={<AlertTriangle />} label="المتبقي" value={money(supplierDebts.reduce((sum, debt) => sum + debtRemaining(debt), 0))} foot="رصيد الديون الحالي" warning={supplierDebts.some(debt => debtRemaining(debt) > 0)} />
+              <Stat icon={<AlertTriangle />} label="ديون متأخرة" value={String(overdueSupplierDebts.length)} foot="موعد السداد عدى ولسه فيه متبقي" warning={overdueSupplierDebts.length > 0} />
+            </section>
+            {overdueSupplierDebts.length > 0 && <div className="notice" role="status">تنبيه: يوجد {overdueSupplierDebts.length} دين مورد متأخر عن موعد السداد. راجع القائمة أدناه.</div>}
+            <section className="panel">
+              <div className="panel-head products-head"><div><h3>تسجيل دين مورد</h3><p>سجّل قيمة الدين وموعد استحقاقه لمتابعة السداد.</p></div></div>
+              <div className="form-grid">
+                <label className="field"><span>اسم المورد *</span><input value={debtSupplier} onChange={e => setDebtSupplier(e.target.value)} placeholder="اسم المورد" /></label>
+                <label className="field"><span>رقم الهاتف</span><input value={debtPhone} onChange={e => setDebtPhone(e.target.value)} placeholder="رقم التواصل" /></label>
+                <label className="field"><span>رقم فاتورة / مرجع</span><input value={debtReference} onChange={e => setDebtReference(e.target.value)} placeholder="اختياري" /></label>
+                <label className="field"><span>قيمة الدين *</span><input type="number" min="0.01" step="0.01" value={debtAmount} onChange={e => setDebtAmount(e.target.value)} placeholder="0.00" /></label>
+                <label className="field"><span>تاريخ الدين *</span><input type="date" value={debtDate} onChange={e => setDebtDate(e.target.value)} /></label>
+                <label className="field"><span>موعد السداد *</span><input type="date" value={debtDueDate} onChange={e => setDebtDueDate(e.target.value)} /></label>
+                <label className="field"><span>بيان / ملاحظات</span><input value={debtDescription} onChange={e => setDebtDescription(e.target.value)} placeholder="تفاصيل الدين أو المشتريات" /></label>
+              </div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}><button className="primary-btn" onClick={addSupplierDebt}><Plus size={17}/> تسجيل الدين</button></div>
+            </section>
+            <section className="panel">
+              <div className="panel-head products-head"><div><h3>سداد دين مورد</h3><p>كل دفعة تُسجل مرة واحدة كمدفوع في الدين ومصروف في الخزنة.</p></div></div>
+              <div className="form-grid">
+                <label className="field"><span>اختر الدين</span><select value={payingDebtId} onChange={e => { setPayingDebtId(e.target.value); const d=supplierDebts.find(x=>x.id===e.target.value); setDebtPaymentAmount(d ? String(debtRemaining(d)) : '') }}><option value="">اختر المورد / الدين</option>{supplierDebts.filter(debt=>debtRemaining(debt)>0).map(debt=><option key={debt.id} value={debt.id}>{debt.supplier} — متبقي {money(debtRemaining(debt))}</option>)}</select></label>
+                <label className="field"><span>مبلغ السداد</span><input type="number" min="0.01" step="0.01" value={debtPaymentAmount} onChange={e=>setDebtPaymentAmount(e.target.value)} placeholder="0.00"/></label>
+                <label className="field"><span>ملاحظات السداد</span><input value={debtPaymentNote} onChange={e=>setDebtPaymentNote(e.target.value)} placeholder="اختياري"/></label>
+              </div>
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:14}}><button className="primary-btn" disabled={!payingDebtId} onClick={recordSupplierDebtPayment}><Check size={17}/> تأكيد السداد</button></div>
+            </section>
+            <section className="panel">
+              <div className="panel-head products-head"><div><h3>سجل ديون الموردين</h3><p>كشف حساب لكل دين مع إمكانية الطباعة أو الحفظ PDF.</p></div><span className="muted">{filteredSupplierDebts.length} سجل</span></div>
+              <div className="toolbar"><label className="searchbox"><Search size={18}/><input value={debtSearch} onChange={e=>setDebtSearch(e.target.value)} placeholder="ابحث باسم المورد أو الهاتف أو المرجع..."/></label><button className="secondary-btn" onClick={()=>setDebtSearch('')}>مسح البحث</button></div>
+              {filteredSupplierDebts.length ? <div className="table-wrap"><table><thead><tr><th>المورد</th><th>المرجع</th><th>تاريخ الدين</th><th>موعد السداد</th><th>قيمة الدين</th><th>المسدد</th><th>المتبقي</th><th>الحالة</th><th>كشف حساب</th></tr></thead><tbody>{filteredSupplierDebts.map(debt=>{const remaining=debtRemaining(debt); const overdue=remaining>0&&!!debt.dueDate&&debt.dueDate<today(); return <tr key={debt.id}><td className="product-cell">{debt.supplier}<div className="muted">{debt.phone||''}</div></td><td>{debt.reference||'—'}</td><td>{debt.date}</td><td>{debt.dueDate}</td><td>{money(debt.amount)}</td><td>{money(debtPaid(debt))}</td><td><strong>{money(remaining)}</strong></td><td><span className={remaining===0?'pill success':overdue?'pill danger':'pill warning'}>{remaining===0?'مسدد بالكامل':overdue?'متأخر':'مستحق'}</span></td><td><button className="secondary-btn" onClick={()=>printSupplierDebtStatement(debt)}><Printer size={15}/> طباعة PDF</button></td></tr>})}</tbody></table></div> : <Empty title="لا توجد ديون موردين" detail="سجّل أول دين من النموذج أعلاه أو غيّر كلمة البحث."/>}
+            </section>
+          </>
         )}
 
         {tab === 'reports' && (
