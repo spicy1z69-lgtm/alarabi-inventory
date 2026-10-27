@@ -707,9 +707,15 @@ function InventoryApp({ user }: { user: User }) {
       return
     }
 
+    // Pick the next number above the highest existing quote number so deleting
+    // an older quote does not cause a duplicate number.
+    const highestQuoteNumber = quotes.reduce((highest, quote) => {
+      const match = /^QT-(\d+)$/.exec(quote.number)
+      return match ? Math.max(highest, Number(match[1])) : highest
+    }, 0)
     const quote: Quote = {
       id: crypto.randomUUID(),
-      number: `QT-${String(quotes.length + 1).padStart(4, '0')}`,
+      number: `QT-${String(highestQuoteNumber + 1).padStart(4, '0')}`,
       customer: customer.trim(),
       date: today(),
       items: quoteRows,
