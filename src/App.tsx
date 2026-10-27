@@ -182,7 +182,7 @@ function InventoryApp({ user }: { user: User }) {
           record.setter(cloudValue as never)
           localStorage.setItem(record.localKey, JSON.stringify(cloudValue))
         } else {
-          const localValue = load(record.localKey, record.fallback)
+          const localValue = isOwnerAccount ? load(record.localKey, record.fallback) : record.fallback
           record.setter(localValue as never)
           const { error: saveError } = await supabase.from('app_state').upsert({ owner_id: user.id, state_key: record.key, state_value: localValue, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' })
           if (saveError && active) setCloudError('تعذر رفع البيانات الحالية: ' + saveError.message)
@@ -1713,6 +1713,7 @@ export default function App() {
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [guestBusy, setGuestBusy] = useState(false)
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); setChecking(false) })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user ?? null); setChecking(false) })
@@ -1728,6 +1729,13 @@ export default function App() {
     else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
     else setMessage('تم تسجيل الدخول بنجاح.')
   }
+  const signInAsGuest = async () => {
+    setGuestBusy(true)
+    setMessage('')
+    const { error } = await supabase.auth.signInAnonymously()
+    setGuestBusy(false)
+    if (error) setMessage('تعذر الدخول كزائر: ' + error.message)
+  }
   if (checking) return <div className="auth-page"><div className="auth-card">جارٍ التحقق من تسجيل الدخول...</div></div>
   if (user) return <InventoryApp user={user} />
   return <div className="auth-page" dir="rtl"><form className="auth-card" onSubmit={submit}>
@@ -1737,7 +1745,11 @@ export default function App() {
     <label>البريد الإلكتروني<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
     <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="6 أحرف على الأقل" /></label>
     {message && <div className="auth-message">{message}</div>}
-    <button className="primary-btn auth-submit" disabled={busy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
+    <button className="primary-btn auth-submit" disabled={busy || guestBusy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
+    {mode === 'login' && <>
+      <div className="auth-divider"><span>أو</span></div>
+      <button type="button" className="guest-btn" disabled={busy || guestBusy} onClick={signInAsGuest}>{guestBusy ? 'جارٍ الدخول كزائر...' : 'الدخول كزائر بدون إيميل أو باسورد'}</button>
+    </>}
     <button type="button" className="text-button auth-toggle" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? 'أول مرة؟ أنشئ حسابًا' : 'لديك حساب؟ سجّل الدخول'}</button>
   </form></div>
 }
