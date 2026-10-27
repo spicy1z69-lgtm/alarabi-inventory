@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const crypto = require('node:crypto')
 
 let db
 // Map each renderer to the authenticated Supabase user. A boolean/Set is not
@@ -8,9 +9,9 @@ let db
 const authenticatedContents = new Map()
 
 function requireAuthenticated(event) {
-  const userId = authenticatedContents.get(event.sender.id)
-  if (!userId) throw new Error('سجّل الدخول أولًا لاستخدام بيانات المحل.')
-  return userId
+  const identity = authenticatedContents.get(event.sender.id)
+  if (!identity || typeof identity.ownerId !== 'string') throw new Error('سجّل الدخول أولًا لاستخدام بيانات المحل.')
+  return identity.ownerId
 }
 
 function initializeDatabase() {
@@ -41,6 +42,14 @@ function initializeDatabase() {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (owner_id, state_key)
     );
+    CREATE TABLE IF NOT EXISTS local_users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      username_normalized TEXT NOT NULL UNIQUE,
+      password_salt BLOB NOT NULL,
+      password_hash BLOB NOT NULL,
+      created_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
       applied_at TEXT NOT NULL
@@ -70,7 +79,7 @@ function registerAuthHandlers() {
         authenticatedContents.delete(event.sender.id)
         return { ok: false }
       }
-      authenticatedContents.set(event.sender.id, user.id)
+      authenticatedContents.set(event.sender.id, { kind: 'cloud', ownerId: user.id, username: user.email || '' })
       return { ok: true, userId: user.id }
     } catch {
       authenticatedContents.delete(event.sender.id)
@@ -80,6 +89,67 @@ function registerAuthHandlers() {
 
   ipcMain.handle('auth:lock-session', (event) => {
     authenticatedContents.delete(event.sender.id)
+    return { ok: true }
+  })
+}
+
+
+function registerLocalAuthHandlers() {
+  ipcMain.handle('auth:local-status', (event) => {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM local_users').get().count
+    const identity = authenticatedContents.get(event.sender.id)
+    return { hasUser: count > 0, session: identity?.kind === 'local' ? { ownerId: identity.ownerId, username: identity.username } : null }
+  })
+
+  ipcMain.handle('auth:local-signup', (event, username, password) => {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM local_users').get().count
+    if (count > 0) throw new Error('تم إنشاء الحساب المحلي بالفعل. سجّل الدخول بدلًا من إنشاء حساب جديد.')
+    if (typeof username !== 'string' || username.trim().length < 3 || username.trim().length > 40 || !/^[\p{L}\p{N}_. -]+$/u.test(username.trim())) {
+      throw new Error('اسم المستخدم لازم يكون من 3 إلى 40 حرفًا أو رقمًا.')
+    }
+    if (typeof password !== 'string' || password.length < 10 || password.length > 256) {
+      throw new Error('كلمة المرور لازم تكون 10 أحرف على الأقل.')
+    }
+    const salt = crypto.randomBytes(16)
+    const passwordHash = crypto.scryptSync(password, salt, 64)
+    const id = crypto.randomUUID()
+    try {
+      db.prepare('INSERT INTO local_users (id, username, username_normalized, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(id, username.trim(), username.trim().toLocaleLowerCase(), salt, passwordHash, new Date().toISOString())
+    } catch {
+      throw new Error('تعذر إنشاء الحساب المحلي.')
+    }
+    const identity = { kind: 'local', ownerId: 'local:' + id, username: username.trim() }
+    authenticatedContents.set(event.sender.id, identity)
+    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username } }
+  })
+
+  ipcMain.handle('auth:local-login', (event, username, password) => {
+    if (typeof username !== 'string' || typeof password !== 'string' || username.length > 40 || password.length > 256) {
+      throw new Error('اسم المستخدم أو كلمة المرور غير صحيحين.')
+    }
+    const row = db.prepare('SELECT id, username, password_salt, password_hash FROM local_users WHERE username_normalized = ?')
+      .get(username.trim().toLocaleLowerCase())
+    const salt = row?.password_salt || Buffer.alloc(16)
+    const expected = row?.password_hash || Buffer.alloc(64)
+    const actual = crypto.scryptSync(password, salt, 64)
+    if (!row || !crypto.timingSafeEqual(actual, expected)) {
+      authenticatedContents.delete(event.sender.id)
+      throw new Error('اسم المستخدم أو كلمة المرور غير صحيحين.')
+    }
+    const identity = { kind: 'local', ownerId: 'local:' + row.id, username: row.username }
+    authenticatedContents.set(event.sender.id, identity)
+    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username } }
+  })
+
+  ipcMain.handle('auth:local-session', (event) => {
+    const identity = authenticatedContents.get(event.sender.id)
+    return identity?.kind === 'local' ? { ownerId: identity.ownerId, username: identity.username } : null
+  })
+
+  ipcMain.handle('auth:local-logout', (event) => {
+    const identity = authenticatedContents.get(event.sender.id)
+    if (identity?.kind === 'local') authenticatedContents.delete(event.sender.id)
     return { ok: true }
   })
 }
@@ -178,6 +248,7 @@ function createWindow() {
 app.whenReady().then(() => {
   initializeDatabase()
   registerAuthHandlers()
+  registerLocalAuthHandlers()
   registerDatabaseHandlers()
   createWindow()
   app.on('activate', () => {
