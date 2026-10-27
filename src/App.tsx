@@ -105,21 +105,38 @@ type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'reports'
 function InventoryApp({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
+  const [tutorialTargetRect, setTutorialTargetRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
   const tutorialSteps = [
-    { title: 'أهلاً بيك في برنامج العربي 👋', text: 'هنمشي سوا خطوة خطوة ونعرفك كل جزء في البرنامج. متقلقش، الشرح بسيط وبالعامية المصرية، ومش هيغيّر أي بيانات عندك.', tab: 'dashboard' as Tab },
-    { title: '١- لوحة التحكم', text: 'دي الصفحة الرئيسية. منها هتاخد نظرة سريعة على حالة المخزون، الأصناف اللي قربت تخلص، وأرقام المبيعات والحركة المالية حسب البيانات المسجلة.', tab: 'dashboard' as Tab },
-    { title: '٢- الأصناف والمخزون', text: 'هنا بتضيف صنف جديد أو تعدّل صنف موجود. اكتب كود الصنف واسمه وفئته والكمية وسعر البيع والتكلفة وحد التنبيه. راجع الكمية كويس قبل الحفظ.', tab: 'products' as Tab },
-    { title: '٣- عروض الأسعار', text: 'لما عميل يطلب سعر، افتح عروض الأسعار واعمل عرض جديد، اختار الأصناف والكميات، وراجع الإجمالي قبل ما تطبع العرض أو تحفظه PDF.', tab: 'quotes' as Tab },
-    { title: '٤- الفواتير', text: 'بعد تأكيد البيع، سجّل الفاتورة باسم العميل والأصناف والكميات والخصم والضريبة والمبلغ المدفوع. راجع المتبقي وحالة السداد قبل الحفظ.', tab: 'invoices' as Tab },
-    { title: '٥- الخزنة والحركة المالية', text: 'سجّل الفلوس اللي دخلت الخزنة والفلوس اللي خرجت، وحدد المبلغ والبند واكتب ملاحظة لو محتاج. اتأكد من المبلغ قبل ما تسجل الحركة.', tab: 'cash' as Tab },
-    { title: '٦- التقارير والتصدير', text: 'من هنا تراجع التقارير وتحدد الفترة اللي عايز تشوفها، وتصدّر البيانات أو تعمل نسخة احتياطية. احتفظ بالنسخة الاحتياطية في مكان آمن.', tab: 'reports' as Tab },
-    { title: '٧- الحفظ والحسابات', text: 'البيانات بتتحفظ على السحابة للحساب اللي داخل بيه. حساب الضيف ليه بيانات منفصلة عن حساب الإدارة. ما تشاركش كلمة المرور، وقبل استرجاع نسخة احتياطية اتأكد إنها النسخة الصح.', tab: 'dashboard' as Tab },
-    { title: 'كده خلصنا الجولة 🎉', text: 'تقدر تبدأ تستخدم البرنامج. تقدر تفتح الشرح تاني من زر «شرح البرنامج» في القائمة الجانبية، ولو مش فاهم خطوة ارجع لها براحتك.', tab: 'dashboard' as Tab },
+    { title: 'مرحبًا بك في برنامج العربي', text: 'هذه جولة سريعة للتعرّف على أقسام البرنامج. اتبع السهم في كل خطوة لمعرفة مكان القسم ووظيفته. الجولة لا تعدّل بياناتك.', tab: 'dashboard' as Tab, target: null },
+    { title: 'لوحة التحكم', text: 'تعرض لك ملخصًا عن المخزون والأصناف التي وصلت إلى حد التنبيه، بالإضافة إلى مؤشرات المبيعات والحركة المالية المسجلة.', tab: 'dashboard' as Tab, target: 'dashboard' },
+    { title: 'الأصناف والمخزون', text: 'من هنا يمكنك إضافة صنف أو تعديل بياناته، مثل الكود والاسم والكمية وسعر البيع والتكلفة وحد التنبيه. راجع البيانات قبل الحفظ.', tab: 'products' as Tab, target: 'products' },
+    { title: 'عروض الأسعار', text: 'أنشئ عرض سعر للعميل، وحدد الأصناف والكميات، ثم راجع الأسعار والإجمالي قبل حفظ العرض أو طباعته.', tab: 'quotes' as Tab, target: 'quotes' },
+    { title: 'الفواتير', text: 'سجّل عملية البيع وبيانات العميل والأصناف والكميات والمبالغ المدفوعة. تأكد من الإجمالي والمبلغ المتبقي قبل اعتماد الفاتورة.', tab: 'invoices' as Tab, target: 'invoices' },
+    { title: 'الخزنة والحركة المالية', text: 'سجّل المبالغ الواردة والمنصرفة، وحدد البند والمبلغ وأضف ملاحظة عند الحاجة. راجع قيمة الحركة قبل تسجيلها.', tab: 'cash' as Tab, target: 'cash' },
+    { title: 'التقارير والتصدير', text: 'راجع التقارير وحدد الفترة المطلوبة، ويمكنك تصدير البيانات أو إنشاء نسخة احتياطية للاحتفاظ بها في مكان آمن.', tab: 'reports' as Tab, target: 'reports' },
+    { title: 'الحساب والحفظ', text: 'يحفظ البرنامج البيانات على السحابة الخاصة بالحساب الحالي. بيانات حساب الضيف منفصلة عن بيانات حساب الإدارة. احتفظ ببيانات الدخول والنسخ الاحتياطية في مكان آمن.', tab: 'dashboard' as Tab, target: 'account' },
+    { title: 'أصبحت جاهزًا للبدء', text: 'انتهت الجولة التعريفية. يمكنك فتح هذا الشرح في أي وقت من زر «شرح البرنامج» في القائمة الجانبية.', tab: 'dashboard' as Tab, target: null },
   ]
   useEffect(() => {
     const key = 'alarabi-tutorial-completed-' + user.id
     if (localStorage.getItem(key) !== 'yes') setTutorialStep(0)
   }, [user.id])
+  useEffect(() => {
+    if (tutorialStep === null) { setTutorialTargetRect(null); return }
+    const target = tutorialSteps[tutorialStep]?.target
+    if (!target) { setTutorialTargetRect(null); return }
+    const updateRect = () => {
+      const el = document.querySelector('[data-tutorial-target="' + target + '"]')
+      if (!el) { setTutorialTargetRect(null); return }
+      const r = el.getBoundingClientRect()
+      setTutorialTargetRect({ top: r.top, left: r.left, width: r.width, height: r.height })
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }
+    const timer = window.setTimeout(updateRect, 150)
+    window.addEventListener('resize', updateRect)
+    window.addEventListener('scroll', updateRect, true)
+    return () => { window.clearTimeout(timer); window.removeEventListener('resize', updateRect); window.removeEventListener('scroll', updateRect, true) }
+  }, [tutorialStep, tab])
   const finishTutorial = () => {
     localStorage.setItem('alarabi-tutorial-completed-' + user.id, 'yes')
     setTutorialStep(null)
@@ -715,31 +732,31 @@ function InventoryApp({ user }: { user: User }) {
 
         <nav>
           <button
-            className={tab === 'dashboard' ? 'nav-item active' : 'nav-item'}
+            className={tab === 'dashboard' ? 'nav-item active' : 'nav-item'} data-tutorial-target="dashboard"
             onClick={() => setTab('dashboard')}
           >
             <LayoutDashboard size={19} /> لوحة التحكم
           </button>
 
           <button
-            className={tab === 'products' ? 'nav-item active' : 'nav-item'}
+            className={tab === 'products' ? 'nav-item active' : 'nav-item'} data-tutorial-target="products"
             onClick={() => setTab('products')}
           >
             <Package size={19} /> الأصناف والمخزون
           </button>
 
           <button
-            className={tab === 'quotes' ? 'nav-item active' : 'nav-item'}
+            className={tab === 'quotes' ? 'nav-item active' : 'nav-item'} data-tutorial-target="quotes"
             onClick={() => setTab('quotes')}
           >
             <FileText size={19} /> عروض الأسعار
             <span className="nav-count">{quotes.length}</span>
           </button>
 
-          <button className={tab === 'cash' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('cash')}><Wallet size={19} /> الخزنة والحركة المالية</button>
+          <button className={tab === 'cash' ? 'nav-item active' : 'nav-item'} data-tutorial-target="cash" onClick={() => setTab('cash')}><Wallet size={19} /> الخزنة والحركة المالية</button>
 
           <button
-            className={tab === 'invoices' ? 'nav-item active' : 'nav-item'}
+            className={tab === 'invoices' ? 'nav-item active' : 'nav-item'} data-tutorial-target="invoices"
             onClick={() => setTab('invoices')}
           >
             <Receipt size={19} /> الفواتير
@@ -747,9 +764,9 @@ function InventoryApp({ user }: { user: User }) {
           </button>
         </nav>
 
-        <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
+        <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} data-tutorial-target="reports" onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
         <button className="nav-item" onClick={() => { setTutorialStep(0); setTab('dashboard') }}>📘 شرح البرنامج</button>
-        <button className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
+        <button data-tutorial-target="account" className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
           <small>v1.0.0</small>
@@ -757,18 +774,20 @@ function InventoryApp({ user }: { user: User }) {
       </aside>
 
       <main className="main">
-        {tutorialStep !== null && <div role="dialog" aria-modal="true" aria-label="شرح البرنامج" style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(10,24,38,.72)', display: 'grid', placeItems: 'center', padding: 18 }}>
-          <section style={{ width: 'min(100%, 520px)', background: '#fff', color: '#18334b', borderRadius: 18, padding: 24, boxShadow: '0 24px 80px rgba(0,0,0,.28)', direction: 'rtl', textAlign: 'right' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 18 }}>
-              <span style={{ fontSize: 12, color: '#61788a' }}>جولة تعريفية · {tutorialStep + 1} من {tutorialSteps.length}</span>
-              <button type="button" onClick={finishTutorial} style={{ border: 0, background: '#edf2f6', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', color: '#18334b' }}>اقفل الشرح</button>
+        {tutorialStep !== null && <div role="dialog" aria-modal="true" aria-label="شرح البرنامج" style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(9,22,36,.58)', padding: 18, direction: 'rtl' }}>
+          {tutorialTargetRect && <div aria-hidden="true" style={{ position: 'fixed', top: tutorialTargetRect.top - 5, left: tutorialTargetRect.left - 5, width: tutorialTargetRect.width + 10, height: tutorialTargetRect.height + 10, border: '2px solid #d2a85b', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(9,22,36,.22), 0 0 22px rgba(210,168,91,.65)', pointerEvents: 'none', zIndex: 10000, transition: 'all .25s ease' }} />}
+          {tutorialTargetRect && <div aria-hidden="true" style={{ position: 'fixed', top: Math.max(8, tutorialTargetRect.top + tutorialTargetRect.height / 2 - 18), left: Math.max(8, tutorialTargetRect.left - 48), zIndex: 10001, color: '#f0c66e', fontSize: 38, lineHeight: 1, filter: 'drop-shadow(0 2px 5px rgba(0,0,0,.4))', pointerEvents: 'none' }}>➜</div>}
+          <section style={{ position: 'absolute', left: '50%', bottom: 'max(20px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', width: 'min(100%, 520px)', background: 'linear-gradient(145deg,#fff,#f5f8fb)', color: '#18334b', border: '1px solid rgba(255,255,255,.7)', borderRadius: 20, padding: 22, boxShadow: '0 24px 80px rgba(0,0,0,.3)', textAlign: 'right' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#718397' }}>دليل الاستخدام · {tutorialStep + 1} من {tutorialSteps.length}</span>
+              <button type="button" onClick={finishTutorial} style={{ border: 0, background: '#eaf0f5', borderRadius: 9, padding: '8px 12px', cursor: 'pointer', color: '#29445c' }}>إنهاء الشرح ×</button>
             </div>
-            <div style={{ height: 5, background: '#e7edf2', borderRadius: 9, overflow: 'hidden', marginBottom: 22 }}><div style={{ height: '100%', width: ((tutorialStep + 1) / tutorialSteps.length * 100) + '%', background: '#c4a264', transition: 'width .2s' }} /></div>
-            <h2 style={{ fontSize: 23, margin: '0 0 12px', color: '#173653' }}>{tutorialSteps[tutorialStep].title}</h2>
-            <p style={{ fontSize: 16, lineHeight: 1.9, margin: '0 0 24px', color: '#40576a' }}>{tutorialSteps[tutorialStep].text}</p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-              <button type="button" onClick={() => moveTutorial(-1)} disabled={tutorialStep === 0} style={{ border: '1px solid #d7e0e7', background: '#fff', color: '#173653', borderRadius: 9, padding: '11px 16px', cursor: 'pointer', opacity: tutorialStep === 0 ? .45 : 1 }}>السابق</button>
-              <button type="button" onClick={() => moveTutorial(1)} style={{ border: 0, background: '#173653', color: '#fff', borderRadius: 9, padding: '11px 18px', cursor: 'pointer', fontWeight: 700 }}>{tutorialStep === tutorialSteps.length - 1 ? 'يلا نبدأ' : 'التالي'}</button>
+            <div style={{ height: 4, background: '#e5ebf0', borderRadius: 9, overflow: 'hidden', marginBottom: 18 }}><div style={{ height: '100%', width: ((tutorialStep + 1) / tutorialSteps.length * 100) + '%', background: 'linear-gradient(90deg,#b38b43,#e3c47f)', transition: 'width .25s' }} /></div>
+            <h2 style={{ fontSize: 22, margin: '0 0 10px', color: '#173653' }}>{tutorialSteps[tutorialStep].title}</h2>
+            <p style={{ fontSize: 15, lineHeight: 1.9, margin: '0 0 22px', color: '#53687a' }}>{tutorialSteps[tutorialStep].text}</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <button type="button" onClick={() => moveTutorial(-1)} disabled={tutorialStep === 0} style={{ border: '1px solid #d7e0e7', background: '#fff', color: '#173653', borderRadius: 10, padding: '11px 16px', cursor: 'pointer', opacity: tutorialStep === 0 ? .45 : 1 }}>السابق</button>
+              <button type="button" onClick={() => moveTutorial(1)} style={{ border: 0, background: 'linear-gradient(135deg,#173653,#245579)', color: '#fff', borderRadius: 10, padding: '11px 20px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 5px 14px rgba(23,54,83,.2)' }}>{tutorialStep === tutorialSteps.length - 1 ? 'ابدأ الاستخدام' : 'التالي ←'}</button>
             </div>
           </section>
         </div>}
