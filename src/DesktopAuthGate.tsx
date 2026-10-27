@@ -124,39 +124,59 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
   const title = mode === 'signup' ? 'إنشاء حساب جديد' : mode === 'forgot' ? 'استعادة كلمة المرور' : mode === 'recovery' ? 'كلمة مرور جديدة' : 'تسجيل الدخول'
   const description = mode === 'signup' ? 'أنشئ حسابًا أونلاين خاصًا بك. البريد الإلكتروني مطلوب لاستعادة الحساب.' : mode === 'forgot' ? 'اكتب بريدك الإلكتروني لنرسل رابط استعادة كلمة المرور.' : mode === 'recovery' ? 'اكتب كلمة المرور الجديدة لحسابك.' : 'سجّل الدخول بحسابك لفتح نظام جرد العربي.'
 
-  return <main style={styles.page}><section style={styles.card}>
-    <div style={styles.logo}>ع</div>
-    <h1 style={styles.heading}>نظام جرد العربي</h1><h2 style={styles.subheading}>{title}</h2>
-    <p style={styles.description}>{ready ? description : 'جاري الاتصال بخدمة الحسابات الآمنة…'}</p>
-    {!ready ? <p role="status">لحظة واحدة…</p> : <form onSubmit={submit}>
+  return <main style={styles.page} dir="rtl"><section style={styles.card}>
+    <div style={styles.accent} />
+    <header style={styles.brandHeader}>
+      <div style={styles.logo}>ع</div>
+      <div style={styles.brandCopy}>
+        <div style={styles.eyebrow}>AL ARABI INVENTORY</div>
+        <h1 style={styles.heading}>العربي</h1>
+        <p style={styles.brandSubtitle}>لأنظمة التأريض والحماية من الصواعق</p>
+      </div>
+    </header>
+    <div style={styles.sectionHead}>
+      <div style={styles.secureMark}>✓</div>
+      <div><h2 style={styles.subheading}>{title}</h2><p style={styles.description}>{ready ? description : 'جاري الاتصال بخدمة الحسابات الآمنة…'}</p></div>
+    </div>
+    {!ready ? <p role="status" style={styles.notice}>لحظة واحدة…</p> : <form onSubmit={submit}>
       {mode === 'signup' && <><label style={styles.label}>اسم المستخدم</label><input style={styles.input} autoComplete="nickname" value={username} onChange={e=>setUsername(e.target.value)} required minLength={3} maxLength={40} placeholder="اسم يظهر في حسابك" /></>}
       {mode !== 'recovery' && <><label style={styles.label}>{mode === 'login' ? 'البريد الإلكتروني (اسم الدخول)' : 'البريد الإلكتروني'}</label><input style={styles.input} type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required maxLength={254} placeholder="name@example.com" /></>}
       {mode !== 'forgot' && <><label style={styles.label}>{mode === 'recovery' ? 'كلمة المرور الجديدة' : 'كلمة المرور'}</label><input style={styles.input} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={8} maxLength={256} placeholder="8 أحرف على الأقل" /></>}
       {(mode === 'signup' || mode === 'recovery') && <><label style={styles.label}>تأكيد كلمة المرور</label><input style={styles.input} type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)} required minLength={8} maxLength={256} /></>}
       {error && <p role="alert" style={styles.error}>{error}</p>}{notice && <p role="status" style={styles.notice}>{notice}</p>}
-      <button disabled={busy} style={styles.submit}>{busy ? 'لحظة واحدة…' : mode === 'signup' ? 'إنشاء الحساب' : mode === 'forgot' ? 'إرسال رابط الاستعادة' : mode === 'recovery' ? 'حفظ كلمة المرور' : 'تسجيل الدخول'}</button>
+      <button disabled={busy} style={{...styles.submit, opacity:busy ? .72 : 1, cursor:busy ? 'wait' : 'pointer'}}>{busy ? 'لحظة واحدة…' : mode === 'signup' ? 'إنشاء الحساب' : mode === 'forgot' ? 'إرسال رابط الاستعادة' : mode === 'recovery' ? 'حفظ كلمة المرور' : 'تسجيل الدخول'} <span aria-hidden="true">←</span></button>
       <div style={styles.links}>
         {mode === 'login' && <><button type="button" style={styles.link} onClick={()=>{setMode('forgot');setError('');setNotice('')}}>نسيت كلمة المرور؟</button><button type="button" style={styles.link} onClick={()=>{setMode('signup');setError('');setNotice('')}}>إنشاء حساب جديد</button><button type="button" disabled={busy} style={styles.link} onClick={()=>void resendConfirmation()}>{busy ? 'لحظة واحدة…' : 'إعادة إرسال رسالة التأكيد'}</button></>}
-        {(mode === 'signup' || mode === 'forgot') && <button type="button" style={styles.link} onClick={()=>{setMode('login');setError('');setNotice('')}}>العودة لتسجيل الدخول</button>}
+        {(mode === 'signup' || mode === 'forgot' || mode === 'recovery') && <button type="button" style={styles.link} onClick={()=>{setMode('login');setError('');setNotice('')}}>العودة لتسجيل الدخول</button>}
       </div>
-      <p style={styles.foot}>الحسابات محفوظة عبر خدمة أونلاين آمنة. لا تشارك كلمة المرور مع أي شخص.</p>
+      <div style={styles.footerRule} />
+      <p style={styles.foot}><span style={styles.lockDot}>●</span> الحسابات محمية. لا تشارك كلمة المرور مع أي شخص.</p>
     </form>}
   </section></main>
 }
 
 const styles = {
-  page: { minHeight:'100vh', display:'grid', placeItems:'center', padding:24, background:'linear-gradient(135deg, #edf3fb, #f8fafc)' } as const,
-  card: { boxSizing:'border-box', width:'100%', maxWidth:440, padding:32, borderRadius:22, background:'#fff', boxShadow:'0 24px 70px rgba(20,34,56,.13)', border:'1px solid #e4eaf2' } as const,
-  logo: { width:60, height:60, margin:'0 auto 18px', display:'grid', placeItems:'center', borderRadius:18, background:'#142238', color:'#fff', fontSize:28, fontWeight:800 } as const,
-  heading: { textAlign:'center', margin:'0 0 8px', fontSize:25, color:'#142238' } as const,
-  subheading: { textAlign:'center', margin:'0 0 10px', fontSize:18, color:'#2463eb' } as const,
-  description: { textAlign:'center', color:'#66758a', margin:'0 0 24px', lineHeight:1.8 } as const,
-  label: { display:'block', margin:'14px 0 7px', fontWeight:700, color:'#26354a' } as const,
-  input: { boxSizing:'border-box', width:'100%', border:'1px solid #d7deea', borderRadius:10, padding:'12px 13px', background:'#fff', color:'#182338' } as const,
-  submit: { width:'100%', marginTop:22, border:0, borderRadius:12, padding:'13px 16px', background:'#2463eb', color:'#fff', fontWeight:800, fontSize:16, cursor:'pointer' } as const,
-  links: { display:'flex', justifyContent:'center', flexWrap:'wrap', gap:14, marginTop:18, fontSize:13 } as const,
-  link: { border:0, background:'transparent', color:'#2463eb', cursor:'pointer', padding:4, fontWeight:700 } as const,
-  error: { color:'#b42318', background:'#fff0ee', padding:12, borderRadius:10, margin:'16px 0 0', lineHeight:1.7 } as const,
-  notice: { color:'#176b43', background:'#ecfdf3', padding:12, borderRadius:10, margin:'16px 0 0', lineHeight:1.7 } as const,
-  foot: { textAlign:'center', fontSize:12, color:'#778398', lineHeight:1.8, margin:'18px 0 0' } as const,
+  page: { boxSizing:'border-box', minHeight:'100vh', display:'grid', placeItems:'center', padding:'32px 18px', background:'radial-gradient(ellipse at top right, #e2ebf2 0%, #eef2f5 48%, #e8edf1 100%)', fontFamily:'Tahoma, Arial, sans-serif' } as const,
+  card: { boxSizing:'border-box', position:'relative', overflow:'hidden', width:'100%', maxWidth:510, padding:'34px 38px 27px', borderRadius:16, background:'#fff', boxShadow:'0 22px 65px rgba(23,54,83,.14)', border:'1px solid #d9e2e9' } as const,
+  accent: { position:'absolute', top:0, right:0, left:0, height:6, background:'linear-gradient(90deg,#173653 0%,#245b80 72%,#c6a66b 100%)' } as const,
+  brandHeader: { display:'flex', alignItems:'center', justifyContent:'center', gap:17, padding:'5px 0 25px', borderBottom:'1px solid #e3e9ee' } as const,
+  logo: { flexShrink:0, width:66, height:66, display:'grid', placeItems:'center', borderRadius:12, background:'linear-gradient(145deg,#173653,#245b80)', border:'1px solid #c6a66b', boxShadow:'0 5px 15px rgba(23,54,83,.18)', color:'#fff', fontSize:32, fontWeight:900 } as const,
+  brandCopy: { textAlign:'right' } as const,
+  eyebrow: { fontSize:10, letterSpacing:2, color:'#9b7b42', fontWeight:800, marginBottom:3 } as const,
+  heading: { margin:'0 0 2px', fontSize:27, lineHeight:1.25, color:'#173653', fontWeight:900 } as const,
+  brandSubtitle: { margin:0, fontSize:12, color:'#647787', lineHeight:1.8 } as const,
+  sectionHead: { display:'flex', alignItems:'flex-start', gap:12, margin:'25px 0 17px' } as const,
+  secureMark: { flexShrink:0, width:34, height:34, display:'grid', placeItems:'center', borderRadius:9, background:'#eef4f8', border:'1px solid #d9e5ec', color:'#245b80', fontSize:18, fontWeight:900 } as const,
+  subheading: { margin:'0 0 5px', fontSize:20, color:'#173653', fontWeight:800 } as const,
+  description: { margin:0, color:'#647787', fontSize:13, lineHeight:1.8 } as const,
+  label: { display:'block', margin:'15px 0 7px', fontWeight:700, fontSize:13, color:'#253746' } as const,
+  input: { boxSizing:'border-box', display:'block', width:'100%', border:'1px solid #d4dfe7', borderRadius:8, padding:'13px 14px', background:'#fbfcfd', color:'#253746', fontSize:14, outlineColor:'#245b80' } as const,
+  submit: { display:'flex', alignItems:'center', justifyContent:'center', gap:10, width:'100%', marginTop:23, border:'1px solid #173653', borderRadius:8, padding:'14px 16px', background:'linear-gradient(110deg,#173653,#245b80)', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 5px 12px rgba(23,54,83,.15)' } as const,
+  links: { display:'flex', justifyContent:'center', flexWrap:'wrap', gap:'7px 15px', marginTop:16, fontSize:12 } as const,
+  link: { border:0, background:'transparent', color:'#245b80', cursor:'pointer', padding:'5px 2px', fontWeight:700, fontSize:12 } as const,
+  error: { color:'#9e302a', background:'#fff3f1', border:'1px solid #f1d2ce', padding:12, borderRadius:8, margin:'16px 0 0', lineHeight:1.7, fontSize:13 } as const,
+  notice: { color:'#245b80', background:'#eef4f8', border:'1px solid #d9e5ec', padding:12, borderRadius:8, margin:'16px 0 0', lineHeight:1.7, fontSize:13 } as const,
+  footerRule: { height:1, background:'#e7edf1', marginTop:22 } as const,
+  lockDot: { color:'#c6a66b', fontSize:10, marginLeft:5 } as const,
+  foot: { textAlign:'center', fontSize:11, color:'#718391', lineHeight:1.8, margin:'13px 0 0' } as const,
 }
