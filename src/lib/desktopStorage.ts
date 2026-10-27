@@ -4,9 +4,7 @@ declare global {
   interface Window {
     alarabiDesktop?: {
       isDesktop: boolean
-      authStatus: () => Promise<{ configured: boolean; username: string }>
-      authSetup: (username: string, password: string) => Promise<{ ok: boolean }>
-      authLogin: (username: string, password: string) => Promise<{ ok: boolean }>
+      verifySession: (accessToken: string) => Promise<{ ok: boolean; userId?: string }>
       readAllState: () => Promise<DesktopStateRow[]>
       writeState: (key: string, value: unknown) => Promise<{ ok: boolean }>
       printHtml: (html: string) => Promise<{ ok: boolean }>
