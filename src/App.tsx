@@ -712,18 +712,27 @@ function InventoryApp({ user }: { user: User }) {
     setNotice('تم حذف عرض السعر')
   }
 
-  const printInvoice = (invoice: Invoice) => {
-    const html = invoiceHtml(invoice)
+  const printDocument = (html: string, documentName: string) => {
     if (isDesktopApp() && window.alarabiDesktop?.printHtml) {
-      void window.alarabiDesktop.printHtml(html).then(() => setNotice('تم فتح نافذة طباعة الفاتورة')).catch(error => setNotice('تعذرت الطباعة: ' + String(error)))
+      void window.alarabiDesktop.printHtml(html)
+        .then(() => setNotice('تم فتح نافذة طباعة ' + documentName))
+        .catch(error => setNotice('تعذرت طباعة ' + documentName + ': ' + String(error)))
       return
     }
     const printWindow = window.open('', '_blank')
-    if (!printWindow) { setNotice('اسمح بفتح النوافذ المنبثقة لطباعة الفاتورة'); return }
+    if (!printWindow) { setNotice('اسمح بفتح النوافذ المنبثقة لطباعة ' + documentName); return }
+    printWindow.document.open()
     printWindow.document.write(html)
     printWindow.document.close()
     printWindow.focus()
-    printWindow.print()
+    window.setTimeout(() => {
+      try { printWindow.print() }
+      catch (error) { setNotice('تعذرت طباعة ' + documentName + ': ' + String(error)) }
+    }, 250)
+  }
+
+  const printInvoice = (invoice: Invoice) => {
+    printDocument(invoiceHtml(invoice), 'الفاتورة')
   }
 
   const recordInvoicePayment = (invoice: Invoice) => {
@@ -794,17 +803,7 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const printQuote = (q: Quote) => {
-    const printWindow = window.open('', '_blank')
-
-    if (!printWindow) {
-      setNotice('اسمح بفتح النوافذ المنبثقة لطباعة عرض السعر')
-      return
-    }
-
-    printWindow.document.write(quoteHtml(q))
-    printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
+    printDocument(quoteHtml(q), 'عرض السعر')
   }
 
   return (
