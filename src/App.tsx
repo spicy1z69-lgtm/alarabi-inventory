@@ -110,14 +110,14 @@ function InventoryApp({ user }: { user: User }) {
   const [cloudLoaded, setCloudLoaded] = useState(false)
   const [cloudError, setCloudError] = useState('')
   const [products, setProducts] = useState<Product[]>(() =>
-    load('alarabi-products', seed)
+    []
   )
   const [quotes, setQuotes] = useState<Quote[]>(() =>
-    load('alarabi-quotes', [])
+    []
   )
-  const [invoices, setInvoices] = useState<Invoice[]>(() => load('alarabi-invoices', []))
-  const [cashEntries, setCashEntries] = useState<CashEntry[]>(() => load('alarabi-cash', []))
-  const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => load('alarabi-stock-movements', []))
+  const [invoices, setInvoices] = useState<Invoice[]>(() => [])
+  const [cashEntries, setCashEntries] = useState<CashEntry[]>(() => [])
+  const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => [])
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
   const [cashAmount, setCashAmount] = useState('')
@@ -180,7 +180,7 @@ function InventoryApp({ user }: { user: User }) {
         const cloudValue = values.get(record.key)
         if (cloudValue !== undefined && cloudValue !== null) {
           record.setter(cloudValue as never)
-          localStorage.setItem(record.localKey, JSON.stringify(cloudValue))
+          if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem(record.localKey, JSON.stringify(cloudValue))
         } else {
           const localValue = isOwnerAccount ? load(record.localKey, record.fallback) : record.fallback
           record.setter(localValue as never)
@@ -196,25 +196,25 @@ function InventoryApp({ user }: { user: User }) {
 
   useEffect(() => {
     if (!cloudLoaded) return
-    localStorage.setItem('alarabi-products', JSON.stringify(products))
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-products', JSON.stringify(products))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'products', state_value: products, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الأصناف سحابيًا: ' + error.message) })
   }, [products, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'quotes', state_value: quotes, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ عروض الأسعار سحابيًا: ' + error.message) })
   }, [quotes, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
   }, [invoices, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
   }, [cashEntries, cloudLoaded, user.id])
 
@@ -286,7 +286,7 @@ function InventoryApp({ user }: { user: User }) {
 
   useEffect(() => {
     if (!cloudLoaded) return
-    localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'stock-movements', state_value: stockMovements, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل حركة المخزون: ' + error.message) })
   }, [stockMovements, cloudLoaded, user.id])
 
