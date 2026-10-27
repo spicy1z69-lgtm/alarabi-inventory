@@ -567,6 +567,14 @@ function InventoryApp({ user }: { user: User }) {
       return
     }
 
+    // Reject invalid line items before calculating totals or touching stock.
+    for (const row of quoteRows) {
+      if (!row.productId || !row.name.trim() || !Number.isFinite(row.quantity) || row.quantity <= 0 || !Number.isFinite(row.price) || row.price < 0) {
+        setNotice('راجع أصناف الفاتورة: الكمية لازم تكون أكبر من صفر والسعر لا يقل عن صفر')
+        return
+      }
+    }
+
     // Validate stock before creating an invoice; combine repeated product rows.
     const quantitiesByProduct = new Map<string, number>()
     for (const row of quoteRows) {
@@ -727,6 +735,12 @@ function InventoryApp({ user }: { user: User }) {
     if (!customer.trim() || !quoteRows.length) {
       setNotice('اكتب اسم العميل وأضف صنفًا واحدًا على الأقل')
       return
+    }
+    for (const row of quoteRows) {
+      if (!row.productId || !row.name.trim() || !Number.isFinite(row.quantity) || row.quantity <= 0 || !Number.isFinite(row.price) || row.price < 0) {
+        setNotice('راجع أصناف عرض السعر: الكمية لازم تكون أكبر من صفر والسعر لا يقل عن صفر')
+        return
+      }
     }
 
     // Pick the next number above the highest existing quote number so deleting
