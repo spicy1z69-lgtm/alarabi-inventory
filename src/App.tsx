@@ -617,6 +617,18 @@ function InventoryApp({ user }: { user: User }) {
       ...old,
     ])
     setInvoices(old => [invoice, ...old])
+    // Record any amount collected at invoice creation in the cash ledger as well.
+    if (paid > 0) {
+      setCashEntries(old => [{
+        id: crypto.randomUUID(),
+        kind: 'in' as const,
+        amount: paid,
+        category: 'تحصيل فاتورة',
+        note: 'تحصيل عند إنشاء الفاتورة ' + invoice.number + ' — ' + invoice.customer,
+        date: today(),
+        invoiceId: invoice.id,
+      }, ...old])
+    }
     setInvoiceModal(false)
     setTab('invoices')
     resetInvoiceDraft()
