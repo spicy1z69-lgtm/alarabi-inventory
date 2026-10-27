@@ -60,6 +60,26 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
     if (!result.ok) throw new Error('تعذر التحقق من الحساب على الكمبيوتر. تأكد من الإنترنت وحاول مرة أخرى.')
   }
 
+  const resendConfirmation = async () => {
+    setError('')
+    setNotice('')
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail) {
+      setError('اكتب بريدك الإلكتروني أولًا لإعادة إرسال رسالة التأكيد.')
+      return
+    }
+    setBusy(true)
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: normalizedEmail })
+      if (error) throw error
+      setNotice('لو الحساب محتاج تأكيد، أعدنا طلب إرسال الرسالة. راجع Inbox وSpam، وتأكد من صحة البريد الإلكتروني.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'تعذر طلب رسالة التأكيد. حاول مرة أخرى بعد قليل.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setError(''); setNotice('')
     if (busy) return
@@ -116,7 +136,7 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
       {error && <p role="alert" style={styles.error}>{error}</p>}{notice && <p role="status" style={styles.notice}>{notice}</p>}
       <button disabled={busy} style={styles.submit}>{busy ? 'لحظة واحدة…' : mode === 'signup' ? 'إنشاء الحساب' : mode === 'forgot' ? 'إرسال رابط الاستعادة' : mode === 'recovery' ? 'حفظ كلمة المرور' : 'تسجيل الدخول'}</button>
       <div style={styles.links}>
-        {mode === 'login' && <><button type="button" style={styles.link} onClick={()=>{setMode('forgot');setError('');setNotice('')}}>نسيت كلمة المرور؟</button><button type="button" style={styles.link} onClick={()=>{setMode('signup');setError('');setNotice('')}}>إنشاء حساب جديد</button></>}
+        {mode === 'login' && <><button type="button" style={styles.link} onClick={()=>{setMode('forgot');setError('');setNotice('')}}>نسيت كلمة المرور؟</button><button type="button" style={styles.link} onClick={()=>{setMode('signup');setError('');setNotice('')}}>إنشاء حساب جديد</button><button type="button" disabled={busy} style={styles.link} onClick={()=>void resendConfirmation()}>{busy ? 'لحظة واحدة…' : 'إعادة إرسال رسالة التأكيد'}</button></>}
         {(mode === 'signup' || mode === 'forgot') && <button type="button" style={styles.link} onClick={()=>{setMode('login');setError('');setNotice('')}}>العودة لتسجيل الدخول</button>}
       </div>
       <p style={styles.foot}>الحسابات محفوظة عبر خدمة أونلاين آمنة. لا تشارك كلمة المرور مع أي شخص.</p>
