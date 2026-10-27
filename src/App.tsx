@@ -184,6 +184,9 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [invoicePaid, setInvoicePaid] = useState('0')
   const [invoiceNotes, setInvoiceNotes] = useState('')
   const [query, setQuery] = useState('')
+  const [archiveQuery, setArchiveQuery] = useState('')
+  const [quickSearchOpen, setQuickSearchOpen] = useState(false)
+  const [quickSearchQuery, setQuickSearchQuery] = useState('')
   const [productModal, setProductModal] = useState<Product | null | 'new'>(null)
   const [quoteModal, setQuoteModal] = useState(false)
   const [notice, setNotice] = useState('')
@@ -411,6 +414,69 @@ function InventoryApp({ user }: { user: AppUser }) {
     return sum + Math.max(0, subtotal - discount)
   }, 0)
   const estimatedGrossProfit = knownSalesBeforeTax - knownCostSales
+
+  const quickSearchResults = useMemo(() => {
+    const term = quickSearchQuery.trim().toLocaleLowerCase()
+    if (!term) return [] as { type: Tab; id: string; title: string; subtitle: string }[]
+    const results: { type: Tab; id: string; title: string; subtitle: string }[] = []
+    for (const product of products) {
+      if ((product.name + ' ' + product.code + ' ' + product.category).toLocaleLowerCase().includes(term)) {
+        results.push({ type: 'products', id: product.id, title: product.name, subtitle: product.code + ' · ' + product.category })
+      }
+    }
+    for (const invoice of invoices) {
+      if ((invoice.number + ' ' + invoice.customer + ' ' + invoice.date + ' ' + (invoice.phone || '')).toLocaleLowerCase().includes(term)) {
+        results.push({ type: 'invoices', id: invoice.id, title: invoice.number, subtitle: invoice.customer + ' · ' + invoice.date })
+      }
+    }
+    for (const quote of quotes) {
+      if ((quote.number + ' ' + quote.customer + ' ' + quote.date).toLocaleLowerCase().includes(term)) {
+        results.push({ type: 'quotes', id: quote.id, title: quote.number, subtitle: quote.customer + ' · ' + quote.date })
+      }
+    }
+    for (const entry of cashEntries) {
+      if ((entry.category + ' ' + entry.note + ' ' + entry.date + ' ' + entry.amount).toLocaleLowerCase().includes(term)) {
+        results.push({ type: 'cash', id: entry.id, title: entry.category, subtitle: entry.date + ' · ' + money(entry.amount) + (entry.note ? ' · ' + entry.note : '') })
+      }
+    }
+    for (const movement of stockMovements) {
+      const productCode = products.find(product => product.id === movement.productId)?.code || ''
+      if ((movement.productName + ' ' + productCode + ' ' + movement.reason + ' ' + movement.reference + ' ' + movement.date).toLocaleLowerCase().includes(term)) {
+        results.push({ type: 'products', id: movement.id, title: movement.productName, subtitle: 'حركة مخزون · ' + movement.reference + ' · ' + movement.date })
+      }
+    }
+    return results.slice(0, 30)
+  }, [quickSearchQuery, products, invoices, quotes, cashEntries, stockMovements])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setQuickSearchOpen(true)
+      }
+      if (event.key === 'Escape') setQuickSearchOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const filteredInvoices = useMemo(() => {
+    const term = archiveQuery.trim().toLocaleLowerCase()
+    if (!term) return invoices
+    return invoices.filter(invoice => (invoice.number + ' ' + invoice.customer + ' ' + invoice.date + ' ' + (invoice.phone || '')).toLocaleLowerCase().includes(term))
+  }, [invoices, archiveQuery])
+
+  const filteredQuotes = useMemo(() => {
+    const term = archiveQuery.trim().toLocaleLowerCase()
+    if (!term) return quotes
+    return quotes.filter(quote => (quote.number + ' ' + quote.customer + ' ' + quote.date + ' ' + quote.items.map(item => item.name + ' ' + item.code).join(' ')).toLocaleLowerCase().includes(term))
+  }, [quotes, archiveQuery])
+
+  const filteredCashEntries = useMemo(() => {
+    const term = archiveQuery.trim().toLocaleLowerCase()
+    if (!term) return cashEntries
+    return cashEntries.filter(entry => (entry.category + ' ' + entry.note + ' ' + entry.date + ' ' + entry.amount).toLocaleLowerCase().includes(term))
+  }, [cashEntries, archiveQuery])
 
   const filtered = useMemo(
     () =>
@@ -921,14 +987,54 @@ function InventoryApp({ user }: { user: AppUser }) {
             </h1>
           </div>
 
-          <div className="today-chip">
-            {new Date().toLocaleDateString('ar-EG', {
-              day: 'numeric',
-              month: 'long',
-              year: 'numeric',
-            })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="secondary-button" onClick={() => { setQuickSearchQuery(''); setQuickSearchOpen(true) }} aria-label="بحث سريع" title="بحث سريع (Ctrl+K)" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <Search size={16} /> بحث سريع <kbd style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #d5dde5', borderRadius: 5, background: '#fff' }}>Ctrl K</kbd>
+            </button>
+            <div className="today-chip">
+              {new Date().toLocaleDateString('ar-EG', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </div>
           </div>
         </header>
+
+        {quickSearchOpen && (
+          <div role="dialog" aria-modal="true" aria-label="البحث السريع في البرنامج" onClick={event => { if (event.target === event.currentTarget) setQuickSearchOpen(false) }} style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(8,20,32,.62)', padding: 18, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', direction: 'rtl' }}>
+            <section style={{ width: 'min(100%, 720px)', marginTop: 'min(10vh, 90px)', maxHeight: '78vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fff', color: '#173653', border: '1px solid #dce4eb', borderRadius: 16, boxShadow: '0 24px 80px rgba(0,0,0,.3)' }}>
+              <div style={{ padding: 16, borderBottom: '1px solid #e5ebf0', display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Search size={20} />
+                <input autoFocus value={quickSearchQuery} onChange={event => setQuickSearchQuery(event.target.value)} placeholder="ابحث عن صنف أو كود أو فاتورة أو عميل أو عرض سعر أو حركة..." style={{ flex: 1, minWidth: 0, border: 0, outline: 0, font: 'inherit', padding: 8, color: '#173653' }} />
+                <button type="button" className="icon-btn" aria-label="إغلاق البحث" onClick={() => setQuickSearchOpen(false)}><X size={18} /></button>
+              </div>
+              <div style={{ padding: '8px 16px', color: '#718397', fontSize: 12 }}>اكتب للبحث في السجلات الحالية. اضغط على نتيجة للانتقال للقسم المناسب.</div>
+              <div style={{ overflowY: 'auto', padding: 8 }}>
+                {!quickSearchQuery.trim() ? (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#718397' }}>ابدأ بكتابة اسم أو كود أو رقم مستند.</div>
+                ) : quickSearchResults.length ? quickSearchResults.map(result => (
+                  <button key={result.type + ':' + result.id} type="button" onClick={() => {
+                    setTab(result.type)
+                    setArchiveQuery(quickSearchQuery)
+                    if (result.type === 'products') setQuery(quickSearchQuery)
+                    setQuickSearchOpen(false)
+                  }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 10px', border: 0, borderRadius: 9, background: 'transparent', textAlign: 'right', cursor: 'pointer', color: '#173653' }}>
+                    <span style={{ width: 38, height: 38, flexShrink: 0, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#edf3f7' }}>
+                      {result.type === 'products' ? <Package size={18} /> : result.type === 'invoices' ? <Receipt size={18} /> : result.type === 'quotes' ? <FileText size={18} /> : <Wallet size={18} />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <strong style={{ display: 'block' }}>{result.title}</strong>
+                      <span style={{ display: 'block', color: '#718397', fontSize: 12, marginTop: 3, overflowWrap: 'anywhere' }}>{result.subtitle}</span>
+                    </span>
+                    <span style={{ color: '#718397', fontSize: 11, whiteSpace: 'nowrap' }}>{result.type === 'products' ? 'الأصناف / حركة مخزون' : result.type === 'invoices' ? 'فاتورة' : result.type === 'quotes' ? 'عرض سعر' : 'الخزنة'}</span>
+                  </button>
+                )) : <div style={{ padding: 24, textAlign: 'center', color: '#718397' }}>مفيش نتائج مطابقة للبحث ده.</div>}
+              </div>
+              <div style={{ padding: 12, borderTop: '1px solid #e5ebf0', color: '#718397', fontSize: 11 }}>للإغلاق اضغط Esc · لفتح البحث في أي وقت استخدم Ctrl + K</div>
+            </section>
+          </div>
+        )}
 
         {notice && (
           <button className="notice" onClick={() => setNotice('')}>
@@ -1165,7 +1271,8 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<ClipboardList />} label="عدد الحركات" value={String(cashEntries.length)} foot="حركة مالية مسجلة" />
             </section>
             <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
-            {cashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{cashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
+            <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث بالبند أو الملاحظات أو التاريخ أو المبلغ..." /></label><span className="muted">{filteredCashEntries.length} حركة</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
+            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1375,9 +1482,10 @@ function InventoryApp({ user }: { user: AppUser }) {
                 <div><h3>إدارة الفواتير</h3><p>إنشاء فاتورة، متابعة التحصيل، وطباعة نسخة PDF</p></div>
                 <button className="primary-btn" onClick={() => { resetInvoiceDraft(); setInvoiceModal(true) }}><Plus size={17} /> فاتورة جديدة</button>
               </div>
-              {invoices.length ? <div className="table-wrap"><table>
+              <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث برقم الفاتورة أو اسم العميل أو التاريخ..." /></label><span className="muted">{filteredInvoices.length} فاتورة</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
+              {filteredInvoices.length ? <div className="table-wrap"><table>
                 <thead><tr><th>رقم الفاتورة</th><th>العميل</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th>إجراءات</th></tr></thead>
-                <tbody>{invoices.map(inv => {
+                <tbody>{filteredInvoices.map(inv => {
                   const total = invoiceTotalFor(inv)
                   const balance = Math.max(0, total - inv.paidAmount)
                   return <tr key={inv.id}>
@@ -1412,9 +1520,10 @@ function InventoryApp({ user }: { user: AppUser }) {
               </button>
             </div>
 
-            {quotes.length ? (
+            <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث برقم العرض أو اسم العميل أو الصنف..." /></label><span className="muted">{filteredQuotes.length} عرض</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
+            {filteredQuotes.length ? (
               <div className="quote-list">
-                {quotes.map(q => (
+                {filteredQuotes.map(q => (
                   <div className="quote-list-row" key={q.id}>
                     <div className="quote-icon">
                       <FileText size={18} />
