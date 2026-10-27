@@ -175,6 +175,8 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [cashCategory, setCashCategory] = useState('')
   const [cashNote, setCashNote] = useState('')
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
   const [invoiceCustomer, setInvoiceCustomer] = useState('')
   const [invoicePhone, setInvoicePhone] = useState('')
   const [invoiceDueDate, setInvoiceDueDate] = useState('')
@@ -824,12 +826,18 @@ function InventoryApp({ user }: { user: AppUser }) {
   }
 
   const recordInvoicePayment = (invoice: Invoice) => {
+    const balance = Math.max(0, invoiceTotalFor(invoice) - Math.max(0, invoice.paidAmount || 0))
+    if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
+    setPaymentInvoice(invoice)
+    setPaymentAmount(String(balance))
+  }
+
+  const confirmInvoicePayment = () => {
+    if (!paymentInvoice) return
+    const invoice = paymentInvoice
     const total = invoiceTotalFor(invoice)
     const balance = Math.max(0, total - Math.max(0, invoice.paidAmount || 0))
-    if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
-    const rawAmount = window.prompt('المتبقي على الفاتورة ' + money(balance) + '. اكتب مبلغ التحصيل:')
-    if (rawAmount === null) return
-    const amount = Number(rawAmount)
+    const amount = Number(paymentAmount)
     if (!Number.isFinite(amount) || amount <= 0) { setNotice('اكتب مبلغ تحصيل صحيحًا أكبر من صفر'); return }
     if (amount > balance) { setNotice('مبلغ التحصيل أكبر من المتبقي على الفاتورة'); return }
     const payment = { id: crypto.randomUUID(), kind: 'in' as const, amount, category: 'تحصيل فاتورة', note: 'تحصيل ' + invoice.number + ' — ' + invoice.customer, date: today(), invoiceId: invoice.id }
@@ -839,6 +847,8 @@ function InventoryApp({ user }: { user: AppUser }) {
       const paidAmount = Math.min(total, Math.max(0, item.paidAmount || 0) + amount)
       return { ...item, paidAmount, status: paidAmount >= total ? 'paid' : 'partial' }
     }))
+    setPaymentInvoice(null)
+    setPaymentAmount('')
     setNotice('تم تسجيل التحصيل وتحديث الفاتورة والخزنة معًا')
   }
 
@@ -1834,6 +1844,25 @@ function InventoryApp({ user }: { user: AppUser }) {
               <div className="invoice-summary"><div><span>إجمالي الأصناف</span><b>{money(invoiceSubtotal)}</b></div><div><span>الخصم</span><b>{money(invoiceDiscountValue)}</b></div><div><span>الضريبة</span><b>{money(Math.max(0, invoiceSubtotal - invoiceDiscountValue) * invoiceTaxValue / 100)}</b></div><div className="total-row"><span>الإجمالي النهائي</span><strong>{money(invoiceTotal)}</strong></div><div><span>المتبقي للتحصيل</span><b>{money(invoiceBalance)}</b></div></div>
             </div>}
             <div className="modal-actions"><button className="secondary-btn" onClick={() => setInvoiceModal(false)}>إلغاء</button><button className="primary-btn" onClick={saveInvoice}><Check size={17} /> حفظ الفاتورة</button></div>
+          </section>
+        </div>
+      )}
+
+      {paymentInvoice && (
+        <div className="modal-backdrop" onClick={() => setPaymentInvoice(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div><h2 id="payment-modal-title">تحصيل دفعة من فاتورة</h2><p>فاتورة {paymentInvoice.number} — {paymentInvoice.customer}</p></div>
+              <button className="icon-btn" aria-label="إغلاق" onClick={() => setPaymentInvoice(null)}><X /></button>
+            </div>
+            <div className="form-grid">
+              <div className="field"><span>المتبقي على الفاتورة</span><strong>{money(Math.max(0, invoiceTotalFor(paymentInvoice) - Math.max(0, paymentInvoice.paidAmount || 0)))}</strong></div>
+              <Field label="مبلغ التحصيل بالجنيه *" type="number" value={paymentAmount} onChange={setPaymentAmount} placeholder="اكتب مبلغ التحصيل" />
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-btn" onClick={() => setPaymentInvoice(null)}>إلغاء</button>
+              <button className="primary-btn" onClick={confirmInvoicePayment}><Check size={17} /> تأكيد التحصيل</button>
+            </div>
           </section>
         </div>
       )}
