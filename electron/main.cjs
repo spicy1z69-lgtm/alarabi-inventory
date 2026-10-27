@@ -192,7 +192,7 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
   // The invoice remains viewable even when Windows has no printer installed.
   const parent = BrowserWindow.fromWebContents(event.sender)
   const previewHtml = html
-    .split('onclick="window.print()"').join('onclick="window.alarabiDesktop.savePreviewPdf()"')
+    .split('onclick="window.print()"').join("onclick=\"window.alarabiDesktop.savePreviewPdf().then(result => { if (result.ok) alert('تم حفظ ملف PDF بنجاح') }).catch(error => alert('تعذر حفظ PDF: ' + error.message))\"")
     .split('طباعة الفاتورة / حفظ PDF').join('حفظ الفاتورة PDF')
     .split('طباعة عرض السعر / حفظ PDF').join('حفظ عرض السعر PDF')
 
