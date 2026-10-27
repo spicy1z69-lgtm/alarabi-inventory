@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { isDesktopApp } from './lib/desktopStorage'
 
 type AuthStatus = { configured: boolean; username: string }
@@ -82,7 +82,7 @@ export default function DesktopAuthGate({ children }: Props) {
   )
 }
 
-const fieldStyle: React.CSSProperties = {
+const fieldStyle: CSSProperties = {
   width: '100%',
   border: '1px solid #d7deea',
   borderRadius: 10,
