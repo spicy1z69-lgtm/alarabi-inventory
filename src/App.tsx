@@ -251,24 +251,28 @@ function InventoryApp({ user }: { user: User }) {
   useEffect(() => {
     if (!cloudLoaded) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-products', JSON.stringify(products))
+    if (isDesktopApp()) { void writeDesktopState('products', products).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error))); return }
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'products', state_value: products, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الأصناف سحابيًا: ' + error.message) })
   }, [products, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
+    if (isDesktopApp()) { void writeDesktopState('quotes', quotes).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error))); return }
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'quotes', state_value: quotes, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ عروض الأسعار سحابيًا: ' + error.message) })
   }, [quotes, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
+    if (isDesktopApp()) { void writeDesktopState('invoices', invoices).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error))); return }
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
   }, [invoices, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
+    if (isDesktopApp()) { void writeDesktopState('cash', cashEntries).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error))); return }
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
   }, [cashEntries, cloudLoaded, user.id])
 
