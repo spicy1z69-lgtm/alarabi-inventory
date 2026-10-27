@@ -18,7 +18,8 @@
     "react-dom": "latest",
     "lucide-react": "latest",
     "@supabase/supabase-js": "^2.57.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "better-sqlite3": "^12.2.0"
   },
   "devDependencies": {
     "typescript": "latest",
@@ -26,7 +27,6 @@
     "@types/react-dom": "latest",
     "electron": "^38.2.0",
     "electron-builder": "^26.0.12",
-    "better-sqlite3": "^12.2.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
     "wait-on": "^8.0.4"
