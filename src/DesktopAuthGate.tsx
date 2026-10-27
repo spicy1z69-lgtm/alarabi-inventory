@@ -5,7 +5,7 @@ import { isDesktopApp } from './lib/desktopStorage'
 type Mode = 'login' | 'signup' | 'forgot' | 'recovery'
 const RECOVERY_SITE_URL = 'https://alarabi-inventory.vercel.app'
 
-export default function DesktopAuthGate({ children }: { children: ReactNode }) {
+function CloudAuthGate({ children }: { children: ReactNode }) {
   const desktop = isDesktopApp()
   const [mode, setMode] = useState<Mode>('login')
   const [ready, setReady] = useState(false)
@@ -154,6 +154,73 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
     </form>}
   </section></main>
 }
+
+
+function LocalDesktopAuthGate({ children }: { children: ReactNode }) {
+  const [ready, setReady] = useState(false)
+  const [hasUser, setHasUser] = useState(false)
+  const [unlocked, setUnlocked] = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void window.alarabiDesktop!.localAuthStatus().then(result => {
+      if (!active) return
+      setHasUser(result.hasUser)
+      setUnlocked(Boolean(result.session))
+      setUsername(result.session?.username || '')
+    }).catch(() => {
+      if (active) setError('تعذر فتح قاعدة البيانات المحلية. أغلق البرنامج وافتحه مرة أخرى.')
+    }).finally(() => { if (active) setReady(true) })
+    return () => { active = false }
+  }, [])
+
+  const setup = !hasUser
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError('')
+    if (busy) return
+    if (password.length < 10) { setError('كلمة المرور لازم تكون 10 أحرف على الأقل.'); return }
+    if (setup && password !== confirm) { setError('كلمتا المرور غير متطابقتين.'); return }
+    setBusy(true)
+    try {
+      const result = setup
+        ? await window.alarabiDesktop!.localSignUp(username, password)
+        : await window.alarabiDesktop!.localLogin(username, password)
+      setHasUser(true)
+      setUnlocked(Boolean(result.ok))
+      setUsername(result.session.username)
+      setPassword('')
+      setConfirm('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'تعذر تسجيل الدخول. راجع البيانات وحاول مرة أخرى.')
+    } finally { setBusy(false) }
+  }
+
+  if (unlocked) return <>{children}</>
+  return <main style={styles.page} dir="rtl"><section style={styles.card}>
+    <div style={styles.accent} />
+    <header style={styles.brandHeader}><div style={styles.logo}>ع</div><div style={styles.brandCopy}><div style={styles.eyebrow}>AL ARABI INVENTORY · DESKTOP</div><h1 style={styles.heading}>العربي</h1><p style={styles.brandSubtitle}>حساب محلي للنسخة المكتبية — لا يحتاج بريدًا أو إنترنت</p></div></header>
+    <div style={styles.sectionHead}><div style={styles.secureMark}>✓</div><div><h2 style={styles.subheading}>{setup ? 'إنشاء الحساب المحلي الأول' : 'تسجيل الدخول'}</h2><p style={styles.description}>{ready ? (setup ? 'أنشئ اسم مستخدم وكلمة مرور لحماية بيانات هذا الكمبيوتر.' : 'أدخل بيانات الحساب المحلي لفتح المخزون والفواتير.') : 'جاري تجهيز قاعدة البيانات المحلية…'}</p></div></div>
+    {!ready ? <p role="status" style={styles.notice}>لحظة واحدة…</p> : <form onSubmit={submit}>
+      <label style={styles.label}>اسم المستخدم</label><input style={styles.input} autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required minLength={3} maxLength={40} placeholder="3 إلى 40 حرفًا" />
+      <label style={styles.label}>كلمة المرور</label><input style={styles.input} type="password" autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={10} maxLength={256} placeholder="10 أحرف على الأقل" />
+      {setup && <><label style={styles.label}>تأكيد كلمة المرور</label><input style={styles.input} type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)} required minLength={10} maxLength={256} /></>}
+      {error && <p role="alert" style={styles.error}>{error}</p>}
+      <button disabled={busy} style={{...styles.submit, opacity:busy ? .72 : 1, cursor:busy ? 'wait' : 'pointer'}}>{busy ? 'لحظة واحدة…' : setup ? 'إنشاء الحساب وفتح البرنامج' : 'تسجيل الدخول'} <span aria-hidden="true">←</span></button>
+      <div style={styles.footerRule} /><p style={styles.foot}>كلمة المرور تُخزّن كبصمة مشتقة مع salt، وليست كنص مكشوف. احفظها في مكان آمن.</p>
+    </form>}
+  </section></main>
+}
+
+export default function DesktopAuthGate({ children }: { children: ReactNode }) {
+  return isDesktopApp() ? <LocalDesktopAuthGate>{children}</LocalDesktopAuthGate> : <CloudAuthGate>{children}</CloudAuthGate>
+}
+
 
 const styles = {
   page: { boxSizing:'border-box', minHeight:'100vh', display:'grid', placeItems:'center', padding:'28px 18px', background:'radial-gradient(ellipse at 12% 18%, rgba(190,35,53,.19), transparent 32%), radial-gradient(ellipse at 88% 82%, rgba(32,74,103,.28), transparent 35%), linear-gradient(135deg,#080d13 0%,#101923 52%,#11151c 100%)', fontFamily:'Tahoma, Arial, sans-serif', position:'relative' } as const,
