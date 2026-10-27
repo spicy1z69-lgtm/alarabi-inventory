@@ -121,6 +121,8 @@ function InventoryApp({ user }: { user: User }) {
     { title: 'أصبحت جاهزًا للبدء', text: 'انتهت الجولة التعريفية. يمكنك فتح هذا الشرح في أي وقت من زر «شرح البرنامج» في القائمة الجانبية.', tab: 'dashboard' as Tab, target: null },
   ]
   useEffect(() => {
+    // Do not block the local desktop workflow with the web onboarding overlay.
+    if (isDesktopApp()) { setTutorialStep(null); return }
     const key = 'alarabi-tutorial-completed-' + user.id
     if (localStorage.getItem(key) !== 'yes') setTutorialStep(0)
   }, [user.id])
@@ -711,12 +713,14 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const printInvoice = (invoice: Invoice) => {
-    const printWindow = window.open('', '_blank')
-    if (!printWindow) {
-      setNotice('اسمح بفتح النوافذ المنبثقة لطباعة الفاتورة')
+    const html = invoiceHtml(invoice)
+    if (isDesktopApp() && window.alarabiDesktop?.printHtml) {
+      void window.alarabiDesktop.printHtml(html).then(() => setNotice('تم فتح نافذة طباعة الفاتورة')).catch(error => setNotice('تعذرت الطباعة: ' + String(error)))
       return
     }
-    printWindow.document.write(invoiceHtml(invoice))
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) { setNotice('اسمح بفتح النوافذ المنبثقة لطباعة الفاتورة'); return }
+    printWindow.document.write(html)
     printWindow.document.close()
     printWindow.focus()
     printWindow.print()
