@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
+import { isDesktopApp, readDesktopState, writeDesktopState } from './lib/desktopStorage'
+
+const DESKTOP_USER = { id: 'desktop-local-user' } as unknown as User
 import * as XLSX from 'xlsx'
 import { supabase } from './lib/supabase'
 import {
@@ -207,10 +210,16 @@ function InventoryApp({ user }: { user: User }) {
     const loadCloudState = async () => {
       setCloudLoaded(false)
       setCloudError('')
-      const { data, error } = await supabase.from('app_state').select('state_key,state_value').eq('owner_id', user.id)
-      if (!active) return
-      if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message + ' — لم يتم تحميل البيانات، أعد المحاولة بعد إصلاح الاتصال.'); return }
-      const values = new Map((data ?? []).map(row => [row.state_key, row.state_value]))
+      let values: Map<string, unknown>
+      if (isDesktopApp()) {
+        try { values = await readDesktopState() }
+        catch (error) { if (active) setCloudError('تعذر تحميل قاعدة البيانات المحلية: ' + String(error)); return }
+      } else {
+        const { data, error } = await supabase.from('app_state').select('state_key,state_value').eq('owner_id', user.id)
+        if (!active) return
+        if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message + ' — لم يتم تحميل البيانات، أعد المحاولة بعد إصلاح الاتصال.'); return }
+        values = new Map((data ?? []).map(row => [row.state_key, row.state_value]))
+      }
       // Only the owner's original account may import its existing browser data.
       // Every other account starts with completely empty inventory and records.
       const isOwnerAccount = user.id === '9301075f-da3f-438e-acb6-43fd0af65a41'
@@ -1856,6 +1865,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [guestBusy, setGuestBusy] = useState(false)
   useEffect(() => {
+    if (isDesktopApp()) { setUser(DESKTOP_USER); setChecking(false); return }
     supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); setChecking(false) })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user ?? null); setChecking(false) })
     return () => listener.subscription.unsubscribe()
