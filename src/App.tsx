@@ -14,6 +14,7 @@ import {
 import type { Product, Quote, QuoteItem, Invoice } from './types'
 
 const COMPANY = 'العربي لأنظمة التأريض والحماية من الصواعق'
+const INVOICE_COMPANY = 'العربي لأنظمة التأريض'
 
 const seed: Product[] = [
   {
@@ -2016,7 +2017,7 @@ function invoiceHtml(invoice: Invoice) {
   const statusTextColor = invoice.status === 'paid' ? '#26744d' : invoice.status === 'partial' ? '#8c641c' : '#a23e39'
   return '<!doctype html>' +
 '<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + COMPANY + '</title><style>' +
+'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + INVOICE_COMPANY + '</title><style>' +
 ':root{--navy:#173653;--blue:#245b80;--pale:#eef4f8;--line:#d9e2e9;--ink:#253746;--muted:#647787}' +
 '*{box-sizing:border-box}html{background:#eef1f4}body{font-family:Tahoma,Arial,sans-serif;color:var(--ink);margin:0;padding:28px;background:#eef1f4;font-size:13px;line-height:1.7}' +
 '.sheet{width:100%;max-width:850px;min-height:1050px;margin:0 auto;background:#fff;padding:42px 46px;box-shadow:0 18px 55px rgba(20,43,61,.14);border:1px solid #e1e8ee;position:relative;overflow:hidden}' +
@@ -2033,14 +2034,14 @@ function invoiceHtml(invoice: Invoice) {
 '@page{size:A4;margin:12mm}@media print{html,body{background:#fff;padding:0;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{width:100%;max-width:none;min-height:0;margin:0;padding:8mm 7mm;box-shadow:none;overflow:visible}.head,.details,.bottom-grid,.signatures,.footer{break-inside:avoid}tr{break-inside:avoid}}' +
 '@media(max-width:600px){body{padding:10px}.sheet{padding:28px 18px;min-height:0}.head{align-items:flex-start;flex-direction:column}.brand-lockup{gap:10px}.company-logo{width:72px;height:66px}.company-name{font-size:17px}.doc-badge{align-self:flex-end}.details{grid-template-columns:1fr 1fr;gap:7px}.detail-card{padding:10px}.bottom-grid{grid-template-columns:1fr}.signatures{gap:20px}table{font-size:10px}th,td{padding:8px 5px}}' +
 '</style></head><body><div class="actions"><button onclick="window.print()">طباعة الفاتورة / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
-'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + COMPANY + '</h1><div class="company-sub">EARTHING &amp; LIGHTNING PROTECTION</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
+'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + INVOICE_COMPANY + '</h1><div class="company-sub">EARTHING SYSTEMS</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
 '<section class="title-row"><h2>فاتورة بيع</h2><div class="invoice-no">رقم الفاتورة<br><b>' + escapeHtml(invoice.number) + '</b></div></section>' +
 '<section class="details"><div class="detail-card"><h3>بيانات العميل</h3><div class="value">' + escapeHtml(invoice.customer) + '</div><div class="subvalue">رقم الهاتف: ' + escapeHtml(invoice.phone || 'غير مسجل') + '</div></div>' +
 '<div class="detail-card"><h3>بيانات الفاتورة</h3><div class="value">' + dateLabel + '</div><div class="subvalue">تاريخ الاستحقاق: ' + dueDateLabel + '</div><div class="subvalue">حالة السداد: <span class="status">' + statusLabel + '</span></div></div></section>' +
 '<h3 class="section-title">تفاصيل الأصناف</h3><table><thead><tr><th class="num">م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
 '<section class="bottom-grid"><div class="notes"><h3>ملاحظات وشروط</h3>' + noteHtml + '</div><div class="totals">' +
 '<div class="total-line"><span>إجمالي الأصناف</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(invoice.discount) + '</b></div><div class="total-line"><span>الضريبة (' + invoice.tax + '%)</span><b>' + money(taxAmount) + '</b></div><div class="total-line grand"><span>الإجمالي النهائي</span><b>' + money(total) + '</b></div><div class="total-line"><span>المبلغ المدفوع</span><b>' + money(invoice.paidAmount) + '</b></div><div class="total-line balance"><span>المتبقي</span><b>' + money(balance) + '</b></div></div></section>' +
-'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
+'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + INVOICE_COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
 }
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
