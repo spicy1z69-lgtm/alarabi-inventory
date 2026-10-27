@@ -166,12 +166,15 @@ function InventoryApp({ user }: { user: User }) {
       if (!active) return
       if (error) { setCloudError('تعذر تحميل البيانات السحابية: ' + error.message + ' — لم يتم تحميل البيانات، أعد المحاولة بعد إصلاح الاتصال.'); return }
       const values = new Map((data ?? []).map(row => [row.state_key, row.state_value]))
+      // Only the owner's original account may import its existing browser data.
+      // Every other account starts with completely empty inventory and records.
+      const isOwnerAccount = user.id === '9301075f-da3f-438e-acb6-43fd0af65a41'
       const records = [
-        { key: 'products', localKey: 'alarabi-products', fallback: seed, setter: setProducts },
-        { key: 'quotes', localKey: 'alarabi-quotes', fallback: [] as Quote[], setter: setQuotes },
-        { key: 'invoices', localKey: 'alarabi-invoices', fallback: [] as Invoice[], setter: setInvoices },
-        { key: 'cash', localKey: 'alarabi-cash', fallback: [] as CashEntry[], setter: setCashEntries },
-        { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: [] as StockMovement[], setter: setStockMovements },
+        { key: 'products', localKey: 'alarabi-products', fallback: isOwnerAccount ? load('alarabi-products', seed) : [] as Product[], setter: setProducts },
+        { key: 'quotes', localKey: 'alarabi-quotes', fallback: isOwnerAccount ? load('alarabi-quotes', []) : [] as Quote[], setter: setQuotes },
+        { key: 'invoices', localKey: 'alarabi-invoices', fallback: isOwnerAccount ? load('alarabi-invoices', []) : [] as Invoice[], setter: setInvoices },
+        { key: 'cash', localKey: 'alarabi-cash', fallback: isOwnerAccount ? load('alarabi-cash', []) : [] as CashEntry[], setter: setCashEntries },
+        { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: isOwnerAccount ? load('alarabi-stock-movements', []) : [] as StockMovement[], setter: setStockMovements },
       ] as const
       for (const record of records) {
         const cloudValue = values.get(record.key)
