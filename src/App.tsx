@@ -404,27 +404,53 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const saveProduct = () => {
-    if (!draft.code.trim() || !draft.name.trim()) {
+    const code = draft.code.trim()
+    const name = draft.name.trim()
+    if (!code || !name) {
       setNotice('اكتب كود الصنف واسم الصنف الأول')
       return
     }
 
+    const numericFields = [
+      { label: 'الكمية', value: draft.quantity },
+      { label: 'سعر البيع', value: draft.price },
+      { label: 'سعر التكلفة', value: draft.costPrice },
+      { label: 'حد التنبيه', value: draft.minStock },
+    ]
+    for (const field of numericFields) {
+      const value = Number(field.value)
+      if (!field.value.trim() || !Number.isFinite(value) || value < 0) {
+        setNotice(field.label + ' لازم يكون رقم صحيح أو صفر فأكثر')
+        return
+      }
+    }
+
+    const editingId = productModal !== 'new' && productModal ? productModal.id : null
+    const duplicateCode = products.some(
+      p => p.id !== editingId && p.code.trim().toLocaleLowerCase() === code.toLocaleLowerCase()
+    )
+    if (duplicateCode) {
+      setNotice('كود الصنف موجود بالفعل. استخدم كودًا مختلفًا')
+      return
+    }
+    if (editingId && !products.some(p => p.id === editingId)) {
+      setNotice('الصنف الذي تحاول تعديله لم يعد موجودًا. حدّث القائمة وحاول مرة أخرى')
+      return
+    }
+
     const item: Product = {
-      id:
-        productModal !== 'new' && productModal
-          ? productModal.id
-          : crypto.randomUUID(),
-      code: draft.code.trim(),
-      name: draft.name.trim(),
+      id: editingId ?? crypto.randomUUID(),
+      code,
+      name,
       category: draft.category.trim() || 'عام',
-      quantity: Math.max(0, Number(draft.quantity) || 0),
-      price: Math.max(0, Number(draft.price) || 0),
-      costPrice: Math.max(0, Number(draft.costPrice) || 0),
-      minStock: Math.max(0, Number(draft.minStock) || 0),
+      quantity: Number(draft.quantity),
+      price: Number(draft.price),
+      costPrice: Number(draft.costPrice),
+      minStock: Number(draft.minStock),
     }
 
     setProducts(old =>
-      productModal !== 'new' && productModal
+      editingId
         ? old.map(p => (p.id === item.id ? item : p))
         : [item, ...old]
     )
@@ -531,9 +557,26 @@ function InventoryApp({ user }: { user: User }) {
       setNotice('نسبة الضريبة يجب أن تكون بين 0 و100')
       return
     }
-    if (!Number.isFinite(Number(invoicePaid)) || Number(invoicePaid) < 0) {
-      setNotice('المبلغ المدفوع يجب ألا يكون سالبًا')
+    const paidInput = Number(invoicePaid)
+    if (invoiceStatus !== 'paid' && (!invoicePaid.trim() || !Number.isFinite(paidInput) || paidInput < 0)) {
+      setNotice('المبلغ المدفوع لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
       return
+    }
+    if (invoiceStatus !== 'paid' && paidInput > invoiceTotal) {
+      setNotice('المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة')
+      return
+    }
+    if (!Number.isFinite(invoiceDiscountValue) || invoiceDiscountValue < 0) {
+      setNotice('الخصم لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
+      return
+    }
+
+    // Reject invalid line items before calculating totals or touching stock.
+    for (const row of quoteRows) {
+      if (!row.productId || !row.name.trim() || !Number.isFinite(row.quantity) || row.quantity <= 0 || !Number.isFinite(row.price) || row.price < 0) {
+        setNotice('راجع أصناف الفاتورة: الكمية لازم تكون أكبر من صفر والسعر لا يقل عن صفر')
+        return
+      }
     }
 
     // Validate stock before creating an invoice; combine repeated product rows.
@@ -586,6 +629,18 @@ function InventoryApp({ user }: { user: User }) {
       ...old,
     ])
     setInvoices(old => [invoice, ...old])
+    // Record any amount collected at invoice creation in the cash ledger as well.
+    if (paid > 0) {
+      setCashEntries(old => [{
+        id: crypto.randomUUID(),
+        kind: 'in' as const,
+        amount: paid,
+        category: 'تحصيل فاتورة',
+        note: 'تحصيل عند إنشاء الفاتورة ' + invoice.number + ' — ' + invoice.customer,
+        date: today(),
+        invoiceId: invoice.id,
+      }, ...old])
+    }
     setInvoiceModal(false)
     setTab('invoices')
     resetInvoiceDraft()
@@ -594,10 +649,11 @@ function InventoryApp({ user }: { user: User }) {
 
   const deleteInvoice = (invoice: Invoice) => {
     const linkedPayments = cashEntries.filter(entry => entry.invoiceId === invoice.id)
-    const paymentNote = linkedPayments.length
-      ? ' توجد تحصيلات فعلية مرتبطة بالفاتورة بقيمة ' + money(linkedPayments.reduce((sum, entry) => sum + entry.amount, 0)) + ' وستظل في سجل الخزنة.'
-      : ''
-    if (!window.confirm('متأكد إنك عايز تحذف الفاتورة ' + invoice.number + '؟ سيتم إرجاع كمياتها للمخزون.' + paymentNote)) return
+    if (linkedPayments.length > 0) {
+      setNotice('لا يمكن حذف فاتورة عليها تحصيلات مسجلة. سجّل ردّ المبلغ في الخزنة أولًا حتى لا تتعارض أرصدة الخزنة مع الفواتير.')
+      return
+    }
+    if (!window.confirm('متأكد إنك عايز تحذف الفاتورة ' + invoice.number + '؟ سيتم إرجاع كمياتها للمخزون.')) return
     const returned = new Map<string, number>()
     for (const row of invoice.items || []) {
       returned.set(row.productId, (returned.get(row.productId) || 0) + row.quantity)
@@ -625,7 +681,7 @@ function InventoryApp({ user }: { user: User }) {
       ...old,
     ])
     setInvoices(old => old.filter(item => item.id !== invoice.id))
-    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون' + (linkedPayments.length ? ' مع الإبقاء على التحصيلات الفعلية في الخزنة' : ''))
+    setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون')
   }
 
   const deleteQuote = (quote: Quote) => {
@@ -684,10 +740,22 @@ function InventoryApp({ user }: { user: User }) {
       setNotice('اكتب اسم العميل وأضف صنفًا واحدًا على الأقل')
       return
     }
+    for (const row of quoteRows) {
+      if (!row.productId || !row.name.trim() || !Number.isFinite(row.quantity) || row.quantity <= 0 || !Number.isFinite(row.price) || row.price < 0) {
+        setNotice('راجع أصناف عرض السعر: الكمية لازم تكون أكبر من صفر والسعر لا يقل عن صفر')
+        return
+      }
+    }
 
+    // Pick the next number above the highest existing quote number so deleting
+    // an older quote does not cause a duplicate number.
+    const highestQuoteNumber = quotes.reduce((highest, quote) => {
+      const match = /^QT-(\d+)$/.exec(quote.number)
+      return match ? Math.max(highest, Number(match[1])) : highest
+    }, 0)
     const quote: Quote = {
       id: crypto.randomUUID(),
-      number: `QT-${String(quotes.length + 1).padStart(4, '0')}`,
+      number: `QT-${String(highestQuoteNumber + 1).padStart(4, '0')}`,
       customer: customer.trim(),
       date: today(),
       items: quoteRows,
@@ -1173,10 +1241,20 @@ function InventoryApp({ user }: { user: User }) {
                             className="icon-btn delete"
                             aria-label="حذف"
                             onClick={() => {
+                              const usedInInvoice = invoices.some(invoice =>
+                                (invoice.items || []).some(item => item.productId === p.id)
+                              )
+                              const usedInQuote = quotes.some(quote =>
+                                (quote.items || []).some(item => item.productId === p.id)
+                              )
+                              const usedInMovement = stockMovements.some(movement => movement.productId === p.id)
+
+                              if (usedInInvoice || usedInQuote || usedInMovement) {
+                                setNotice('لا يمكن حذف الصنف لأنه مرتبط بفواتير أو عروض أسعار أو سجل حركة المخزون. احتفظ به لحماية السجلات السابقة، ويمكنك تعديل بياناته بدلًا من حذفه.')
+                                return
+                              }
                               if (confirm(`حذف الصنف ${p.name}؟`)) {
-                                setProducts(old =>
-                                  old.filter(x => x.id !== p.id)
-                                )
+                                setProducts(old => old.filter(x => x.id !== p.id))
                               }
                             }}
                           >
