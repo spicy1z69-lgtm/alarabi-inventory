@@ -1,15 +1,16 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
-const { pathToFileURL } = require('node:url')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 
 let db
-const authenticatedContents = new Set()
+// Map each renderer to the authenticated Supabase user. A boolean/Set is not
+// sufficient: local records must be scoped to the user, and logout must revoke access.
+const authenticatedContents = new Map()
 
 function requireAuthenticated(event) {
-  if (!authenticatedContents.has(event.sender.id)) {
-    throw new Error('سجّل الدخول أولًا لاستخدام بيانات المحل.')
-  }
+  const userId = authenticatedContents.get(event.sender.id)
+  if (!userId) throw new Error('سجّل الدخول أولًا لاستخدام بيانات المحل.')
+  return userId
 }
 
 function initializeDatabase() {
@@ -17,11 +18,28 @@ function initializeDatabase() {
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+
+  const existing = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'").get()
+  if (existing) {
+    const columns = db.prepare('PRAGMA table_info(app_state)').all()
+    if (!columns.some(column => column.name === 'owner_id')) {
+      const legacyExists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state_legacy_unscoped'").get()
+      if (legacyExists) {
+        throw new Error('توجد بيانات محلية قديمة غير مرتبطة بحساب. أوقف التشغيل لحماية البيانات وصدّرها/راجعها يدويًا قبل الترحيل.')
+      }
+      // Preserve old unscoped rows for a future explicit migration; never expose
+      // them to a newly signed-in customer by guessing their owner.
+      db.exec('ALTER TABLE app_state RENAME TO app_state_legacy_unscoped')
+    }
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_state (
-      state_key TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      state_key TEXT NOT NULL,
       state_value TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (owner_id, state_key)
     );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -33,31 +51,48 @@ function initializeDatabase() {
 function registerAuthHandlers() {
   ipcMain.handle('auth:verify-session', async (event, accessToken) => {
     if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 10000) {
+      authenticatedContents.delete(event.sender.id)
       return { ok: false }
     }
-    const response = await fetch('https://dppvlphuctpdszumnllc.supabase.co/auth/v1/user', {
-      headers: {
-        apikey: 'sb_publishable_7pl_sabI8HUQ0kNYgZYZ_g_WONIhxrd',
-        Authorization: 'Bearer ' + accessToken,
-      },
-    })
-    if (!response.ok) return { ok: false }
-    const user = await response.json()
-    if (!user || typeof user.id !== 'string') return { ok: false }
-    authenticatedContents.add(event.sender.id)
-    return { ok: true, userId: user.id }
+    try {
+      const response = await fetch('https://dppvlphuctpdszumnllc.supabase.co/auth/v1/user', {
+        headers: {
+          apikey: 'sb_publishable_7pl_sabI8HUQ0kNYgZYZ_g_WONIhxrd',
+          Authorization: 'Bearer ' + accessToken,
+        },
+      })
+      if (!response.ok) {
+        authenticatedContents.delete(event.sender.id)
+        return { ok: false }
+      }
+      const user = await response.json()
+      if (!user || typeof user.id !== 'string') {
+        authenticatedContents.delete(event.sender.id)
+        return { ok: false }
+      }
+      authenticatedContents.set(event.sender.id, user.id)
+      return { ok: true, userId: user.id }
+    } catch {
+      authenticatedContents.delete(event.sender.id)
+      return { ok: false, reason: 'network' }
+    }
+  })
+
+  ipcMain.handle('auth:lock-session', (event) => {
+    authenticatedContents.delete(event.sender.id)
+    return { ok: true }
   })
 }
 
 function registerDatabaseHandlers() {
   ipcMain.handle('local-state:read-all', (event) => {
-    requireAuthenticated(event)
-    const rows = db.prepare('SELECT state_key, state_value FROM app_state ORDER BY state_key').all()
+    const ownerId = requireAuthenticated(event)
+    const rows = db.prepare('SELECT state_key, state_value FROM app_state WHERE owner_id = ? ORDER BY state_key').all(ownerId)
     return rows.map((row) => ({ key: row.state_key, value: JSON.parse(row.state_value) }))
   })
 
   ipcMain.handle('local-state:write', (event, key, value) => {
-    requireAuthenticated(event)
+    const ownerId = requireAuthenticated(event)
     if (typeof key !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(key)) {
       throw new Error('Invalid state key')
     }
@@ -66,12 +101,12 @@ function registerDatabaseHandlers() {
       throw new Error('State payload is invalid or too large')
     }
     db.prepare(`
-      INSERT INTO app_state (state_key, state_value, updated_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(state_key) DO UPDATE SET
+      INSERT INTO app_state (owner_id, state_key, state_value, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(owner_id, state_key) DO UPDATE SET
         state_value = excluded.state_value,
         updated_at = excluded.updated_at
-    `).run(key, serialized, new Date().toISOString())
+    `).run(ownerId, key, serialized, new Date().toISOString())
     return { ok: true }
   })
 }
@@ -95,8 +130,6 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
     },
   })
   try {
-    // Avoid oversized data: URLs for invoices with many line items. Load a blank
-    // isolated window and write the already-sanitized invoice document into it.
     await printWindow.loadURL('about:blank')
     await printWindow.webContents.executeJavaScript(
       'document.open(); document.write(' + JSON.stringify(html) + '); document.close(); true',
@@ -136,7 +169,7 @@ function createWindow() {
       sandbox: true,
     },
   })
-
+  win.webContents.on('destroyed', () => authenticatedContents.delete(win.webContents.id))
   const devUrl = process.env.VITE_DEV_SERVER_URL
   if (devUrl) win.loadURL(devUrl)
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
