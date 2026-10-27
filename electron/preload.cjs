@@ -14,4 +14,10 @@ contextBridge.exposeInMainWorld('alarabiDesktop', Object.freeze({
   writeState: (key, value) => ipcRenderer.invoke('local-state:write', key, value),
   printHtml: (html) => ipcRenderer.invoke('invoice:print-html', html),
   savePreviewPdf: () => ipcRenderer.invoke('invoice:save-preview-pdf'),
+  onQuickSearchShortcut: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = () => callback()
+    ipcRenderer.on('shortcut:quick-search', listener)
+    return () => ipcRenderer.removeListener('shortcut:quick-search', listener)
+  },
 }))
