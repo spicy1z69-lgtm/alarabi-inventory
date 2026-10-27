@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { isDesktopApp, readDesktopState, writeDesktopState } from './lib/desktopStorage'
+import { getDesktopLocalSession, isDesktopApp, readDesktopState, writeDesktopState } from './lib/desktopStorage'
 
 import * as XLSX from 'xlsx'
 import { supabase } from './lib/supabase'
@@ -104,7 +104,9 @@ type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: str
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'reports'
 
-function InventoryApp({ user }: { user: User }) {
+type AppUser = Pick<User, 'id'>
+
+function InventoryApp({ user }: { user: AppUser }) {
   const [tab, setTab] = useState<Tab>('dashboard')
   const [tutorialStep, setTutorialStep] = useState<number | null>(null)
   const [tutorialTargetRect, setTutorialTargetRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
@@ -211,6 +213,21 @@ function InventoryApp({ user }: { user: User }) {
     const loadCloudState = async () => {
       setCloudLoaded(false)
       setCloudError('')
+      if (isDesktopApp()) {
+        try {
+          const localValues = await readDesktopState()
+          if (!active) return
+          setProducts((localValues.get('products') as Product[] | undefined) ?? [])
+          setQuotes((localValues.get('quotes') as Quote[] | undefined) ?? [])
+          setInvoices((localValues.get('invoices') as Invoice[] | undefined) ?? [])
+          setCashEntries((localValues.get('cash') as CashEntry[] | undefined) ?? [])
+          setStockMovements((localValues.get('stock-movements') as StockMovement[] | undefined) ?? [])
+          setCloudLoaded(true)
+        } catch {
+          if (active) setCloudError('تعذر تحميل البيانات المحلية. لم يتم استبدال البيانات أو إنشاء بيانات افتراضية.')
+        }
+        return
+      }
       let values: Map<string, unknown>
       const { data, error } = await supabase.from('app_state').select('state_key,state_value').eq('owner_id', user.id)
       if (!active) return
@@ -248,29 +265,41 @@ function InventoryApp({ user }: { user: User }) {
 
   useEffect(() => {
     if (!cloudLoaded) return
+    if (isDesktopApp()) {
+      void writeDesktopState('products', products).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
+      return
+    }
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-products', JSON.stringify(products))
-    if (isDesktopApp()) void writeDesktopState('products', products).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error)))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'products', state_value: products, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الأصناف سحابيًا: ' + error.message) })
   }, [products, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
+    if (isDesktopApp()) {
+      void writeDesktopState('quotes', quotes).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
+      return
+    }
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
-    if (isDesktopApp()) void writeDesktopState('quotes', quotes).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error)))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'quotes', state_value: quotes, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ عروض الأسعار سحابيًا: ' + error.message) })
   }, [quotes, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
+    if (isDesktopApp()) {
+      void writeDesktopState('invoices', invoices).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
+      return
+    }
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
-    if (isDesktopApp()) void writeDesktopState('invoices', invoices).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error)))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
   }, [invoices, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
+    if (isDesktopApp()) {
+      void writeDesktopState('cash', cashEntries).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
+      return
+    }
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
-    if (isDesktopApp()) void writeDesktopState('cash', cashEntries).catch(error => setCloudError('تعذر الحفظ محليًا: ' + String(error)))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
   }, [cashEntries, cloudLoaded, user.id])
 
@@ -342,8 +371,11 @@ function InventoryApp({ user }: { user: User }) {
 
   useEffect(() => {
     if (!cloudLoaded) return
+    if (isDesktopApp()) {
+      void writeDesktopState('stock-movements', stockMovements).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
+      return
+    }
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
-    if (isDesktopApp()) void writeDesktopState('stock-movements', stockMovements).catch(error => setCloudError('تعذر حفظ سجل حركة المخزون محليًا: ' + String(error)))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'stock-movements', state_value: stockMovements, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل حركة المخزون: ' + error.message) })
   }, [stockMovements, cloudLoaded, user.id])
 
@@ -1873,6 +1905,15 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [guestBusy, setGuestBusy] = useState(false)
   useEffect(() => {
+    if (isDesktopApp()) {
+      let active = true
+      void getDesktopLocalSession().then(session => {
+        if (!active) return
+        setUser(session ? { id: session.ownerId } : null)
+        setChecking(false)
+      }).catch(() => { if (active) setChecking(false) })
+      return () => { active = false }
+    }
     supabase.auth.getSession().then(({ data }) => { setUser(data.session?.user ?? null); setChecking(false) })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { setUser(session?.user ?? null); setChecking(false) })
     return () => listener.subscription.unsubscribe()
