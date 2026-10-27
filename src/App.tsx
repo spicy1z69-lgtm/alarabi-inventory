@@ -345,6 +345,7 @@ function InventoryApp({ user }: { user: User }) {
   useEffect(() => {
     if (!cloudLoaded) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
+    if (isDesktopApp()) { void writeDesktopState('stock-movements', stockMovements).catch(error => setCloudError('تعذر حفظ سجل حركة المخزون محليًا: ' + String(error))); return }
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'stock-movements', state_value: stockMovements, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل حركة المخزون: ' + error.message) })
   }, [stockMovements, cloudLoaded, user.id])
 
