@@ -183,32 +183,45 @@ function registerDatabaseHandlers() {
 }
 
 ipcMain.handle('invoice:print-html', async (event, html) => {
-  requireAuthenticated(event)
+  const ownerId = requireAuthenticated(event)
   if (typeof html !== 'string' || html.length > 5_000_000) {
     throw new Error('Invalid print document')
   }
+
+  // This is a preview window inside the desktop app, not a native print dialog.
+  // The invoice remains viewable even when Windows has no printer installed.
   const parent = BrowserWindow.fromWebContents(event.sender)
-  const printWindow = new BrowserWindow({
+  const previewHtml = html
+    .split('onclick="window.print()"').join('onclick="window.alarabiDesktop.savePreviewPdf()"')
+    .split('طباعة الفاتورة / حفظ PDF').join('حفظ الفاتورة PDF')
+    .split('طباعة عرض السعر / حفظ PDF').join('حفظ عرض السعر PDF')
+
+  const previewWindow = new BrowserWindow({
     width: 1000,
-    height: 800,
+    height: 850,
+    minWidth: 760,
+    minHeight: 600,
     show: true,
     autoHideMenuBar: true,
     parent: parent || undefined,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   })
+  // Permit only this child preview to use the authenticated PDF-save handler.
+  authenticatedContents.set(previewWindow.webContents.id, { ownerId, kind: 'preview' })
+  previewWindow.webContents.on('destroyed', () => authenticatedContents.delete(previewWindow.webContents.id))
+
   try {
-    await printWindow.loadURL('about:blank')
-    await printWindow.webContents.executeJavaScript(
-      'document.open(); document.write(' + JSON.stringify(html) + '); document.close(); true',
+    await previewWindow.loadURL('about:blank')
+    await previewWindow.webContents.executeJavaScript(
+      'document.open(); document.write(' + JSON.stringify(previewHtml) + '); document.close(); true',
       true,
     )
-    // document.write() does not reliably trigger a new did-finish-load event.
-    // Wait for fonts and images explicitly before opening the native print dialog.
-    await printWindow.webContents.executeJavaScript(`
+    await previewWindow.webContents.executeJavaScript(`
       (async () => {
         if (document.fonts && document.fonts.ready) await document.fonts.ready
         await Promise.all(Array.from(document.images || []).map(img => {
@@ -222,41 +235,34 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
         return true
       })()
     `, true)
-    try {
-      await new Promise((resolve, reject) => {
-        if (printWindow.isDestroyed() || printWindow.webContents.isDestroyed()) {
-          reject(new Error('نافذة الطباعة اتقفلت قبل بدء الطباعة.'))
-          return
-        }
-        printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
-          if (!success) reject(new Error(failureReason || 'لم يتم فتح نافذة الطباعة.'))
-          else resolve()
-        })
-      })
-      return { ok: true }
-    } catch (printError) {
-      // Chromium may fail to enumerate Windows printers when the spooler or
-      // printer drivers are unavailable. Keep invoices usable by offering PDF export.
-      const pdf = await printWindow.webContents.printToPDF({
-        printBackground: true,
-        preferCSSPageSize: true,
-      })
-      const saveResult = await dialog.showSaveDialog(parent || printWindow, {
-        title: 'حفظ الفاتورة كملف PDF',
-        defaultPath: 'فاتورة.pdf',
-        buttonLabel: 'حفظ PDF',
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      })
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { ok: false, cancelled: true }
-      }
-      await fs.writeFile(saveResult.filePath, pdf)
-      return { ok: true, savedAsPdf: true, filePath: saveResult.filePath }
-    }
+    return { ok: true, preview: true }
   } catch (error) {
-    if (!printWindow.isDestroyed()) printWindow.close()
-    throw new Error('فشل فتح نافذة طباعة الفاتورة: ' + (error instanceof Error ? error.message : String(error)))
+    if (!previewWindow.isDestroyed()) previewWindow.close()
+    throw new Error('فشل فتح معاينة الفاتورة: ' + (error instanceof Error ? error.message : String(error)))
   }
+})
+
+ipcMain.handle('invoice:save-preview-pdf', async (event) => {
+  requireAuthenticated(event)
+  const previewWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!previewWindow || previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
+    throw new Error('نافذة المعاينة غير متاحة.')
+  }
+  const pdf = await previewWindow.webContents.printToPDF({
+    printBackground: true,
+    preferCSSPageSize: true,
+  })
+  const saveResult = await dialog.showSaveDialog(previewWindow, {
+    title: 'حفظ الفاتورة كملف PDF',
+    defaultPath: 'فاتورة.pdf',
+    buttonLabel: 'حفظ PDF',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { ok: false, cancelled: true }
+  }
+  await fs.writeFile(saveResult.filePath, pdf)
+  return { ok: true, savedAsPdf: true, filePath: saveResult.filePath }
 })
 
 function createWindow() {
