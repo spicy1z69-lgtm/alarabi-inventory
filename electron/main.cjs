@@ -5,6 +5,13 @@ const path = require('node:path')
 const Database = require('better-sqlite3')
 
 let db
+const authenticatedContents = new Set()
+
+function requireAuthenticated(event) {
+  if (!authenticatedContents.has(event.sender.id)) {
+    throw new Error('سجّل الدخول أولًا لاستخدام بيانات المحل.')
+  }
+}
 
 function initializeDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'alarabi-inventory.sqlite3')
@@ -37,7 +44,7 @@ function registerAuthHandlers() {
     return { configured: Boolean(row), username: row?.username || '' }
   })
 
-  ipcMain.handle('auth:setup', (_event, username, password) => {
+  ipcMain.handle('auth:setup', (event, username, password) => {
     if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,40}$/.test(username.trim())) {
       throw new Error('اسم المستخدم لازم يكون من 3 إلى 40 حرفًا إنجليزيًا أو رقمًا.')
     }
@@ -50,26 +57,31 @@ function registerAuthHandlers() {
     const passwordHash = scryptSync(password, salt, 64).toString('hex')
     db.prepare('INSERT INTO local_auth (id, username, salt, password_hash, created_at) VALUES (1, ?, ?, ?, ?)')
       .run(username.trim(), salt, passwordHash, new Date().toISOString())
+    authenticatedContents.add(event.sender.id)
     return { ok: true }
   })
 
-  ipcMain.handle('auth:login', (_event, username, password) => {
+  ipcMain.handle('auth:login', (event, username, password) => {
     if (typeof username !== 'string' || typeof password !== 'string') return { ok: false }
     const row = db.prepare('SELECT username, salt, password_hash FROM local_auth WHERE id = 1').get()
     if (!row || row.username !== username.trim()) return { ok: false }
     const candidate = scryptSync(password, row.salt, 64)
     const stored = Buffer.from(row.password_hash, 'hex')
-    return { ok: stored.length === candidate.length && timingSafeEqual(stored, candidate) }
+    const ok = stored.length === candidate.length && timingSafeEqual(stored, candidate)
+    if (ok) authenticatedContents.add(event.sender.id)
+    return { ok }
   })
 }
 
 function registerDatabaseHandlers() {
-  ipcMain.handle('local-state:read-all', () => {
+  ipcMain.handle('local-state:read-all', (event) => {
+    requireAuthenticated(event)
     const rows = db.prepare('SELECT state_key, state_value FROM app_state ORDER BY state_key').all()
     return rows.map((row) => ({ key: row.state_key, value: JSON.parse(row.state_value) }))
   })
 
-  ipcMain.handle('local-state:write', (_event, key, value) => {
+  ipcMain.handle('local-state:write', (event, key, value) => {
+    requireAuthenticated(event)
     if (typeof key !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(key)) {
       throw new Error('Invalid state key')
     }
@@ -89,6 +101,7 @@ function registerDatabaseHandlers() {
 }
 
 ipcMain.handle('invoice:print-html', async (event, html) => {
+  requireAuthenticated(event)
   if (typeof html !== 'string' || html.length > 5_000_000) {
     throw new Error('Invalid print document')
   }
@@ -168,5 +181,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  authenticatedContents.clear()
   if (db) db.close()
 })
