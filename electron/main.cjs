@@ -65,12 +65,32 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
       sandbox: true,
     },
   })
-  await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
-  await new Promise(resolve => setTimeout(resolve, 250))
-  printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
-    if (!success) console.error('Invoice print failed:', failureReason)
-  })
-  return { ok: true }
+  try {
+    // Avoid oversized data: URLs for invoices with many line items. Load a blank
+    // isolated window and write the already-sanitized invoice document into it.
+    await printWindow.loadURL('about:blank')
+    await printWindow.webContents.executeJavaScript(
+      'document.open(); document.write(' + JSON.stringify(html) + '); document.close(); true',
+      true,
+    )
+    await new Promise(resolve => {
+      if (printWindow.webContents.isLoading()) {
+        printWindow.webContents.once('did-finish-load', resolve)
+      } else {
+        setTimeout(resolve, 350)
+      }
+    })
+    await new Promise((resolve, reject) => {
+      printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+        if (!success) reject(new Error(failureReason || 'Print dialog did not open'))
+        else resolve()
+      })
+    })
+    return { ok: true }
+  } catch (error) {
+    if (!printWindow.isDestroyed()) printWindow.close()
+    throw error
+  }
 })
 
 function createWindow() {
