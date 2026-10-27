@@ -1489,6 +1489,7 @@ function InventoryApp({ user }: { user: User }) {
                 </h2>
                 <p>املأ بيانات الصنف الأساسية</p>
               </div>
+              {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
 
               <button
                 className="icon-btn"
@@ -1688,6 +1689,7 @@ function InventoryApp({ user }: { user: User }) {
         <div className="modal-backdrop" onClick={() => setInvoiceModal(false)}>
           <section className="modal wide" onClick={e => e.stopPropagation()}>
             <div className="modal-head"><div><h2>إنشاء فاتورة جديدة</h2><p>فاتورة بيع رسمية قابلة للطباعة أو الحفظ PDF</p></div><button className="icon-btn" onClick={() => setInvoiceModal(false)}><X /></button></div>
+            {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
             <div className="form-grid">
               <Field label="اسم العميل / الشركة *" value={invoiceCustomer} onChange={setInvoiceCustomer} placeholder="اسم العميل" />
               <Field label="رقم الهاتف" value={invoicePhone} onChange={setInvoicePhone} placeholder="01xxxxxxxxx" />
