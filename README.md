@@ -1,42 +1,41 @@
-# Alarabi Inventory
+# نظام جرد العربي — AlArabi Inventory
 
-A mobile-friendly starter inventory and quotation app built with **Vite + React + TypeScript**.
-It runs as a static web app, so it can be deployed to Cloudflare Pages. This starter stores data in the current browser using `localStorage`; it does **not** yet sync between devices or users.
+تطبيق لإدارة المخزون وعروض الأسعار والفواتير وحركة الخزنة والمخزون، بواجهة عربية من اليمين إلى اليسار.
 
-## Features
-- Dashboard with product counts and inventory value
-- Product list with search, add, edit, and delete
-- Stock quantity and low-stock indicators
-- Quotations: create a quote from products, calculate totals, and print/save as PDF from the browser
-- Arabic RTL interface
-- Responsive layout for mobile and desktop
-- Demo data on first launch
+## تشغيل نسخة الويب محليًا
 
-## Requirements
-- Node.js 20.19+ or 22.12+
-- npm
+يتطلب Node.js 20.19+ أو 22.12+ وnpm.
 
-## Run locally
 ```bash
 npm install
 npm run dev
 ```
-Open the local URL shown in your terminal.
 
-## Build
+## بناء نسخة الويب
+
 ```bash
 npm run build
 npm run preview
 ```
 
-## Deploy to Cloudflare Pages
-1. Upload this project to a GitHub repository.
-2. In Cloudflare Dashboard, open **Workers & Pages** and create a Pages project connected to the GitHub repo.
-3. Build command: `npm run build`
-4. Build output directory: `dist`
-5. Deploy.
+## تطبيق Windows باستخدام Electron
 
-## Important limitations
-- Data is stored in the browser on one device and browser profile only.
-- This is a starter app, not a secure multi-user production inventory system.
-- Before real business use, add authentication, a server-side database, backups, and access control (e.g. Cloudflare Workers + D1).
+التطبيق المكتبي يستخدم SQLite محليًا داخل مجلد بيانات المستخدم في Windows، لذلك يمكنه حفظ بياناته محليًا دون الاعتماد على اتصال الإنترنت أثناء الاستخدام المعتاد.
+
+لبناء مثبت Windows:
+
+```bash
+npm install
+npm run desktop:build
+```
+
+ملف التثبيت الناتج يوجد داخل مجلد `release`.
+
+## ملاحظات مهمة قبل الاستخدام الفعلي
+
+- يجب اختبار الإضافة والتعديل والحذف وإغلاق التطبيق وإعادة فتحه للتأكد من استمرار البيانات.
+- يجب اختبار النسخ الاحتياطي والاسترجاع عمليًا قبل إدخال بيانات حقيقية.
+- المراقبة عن بُعد ليست متاحة عندما يكون كمبيوتر المحل غير متصل بالإنترنت.
+- نسخة سطح المكتب تستخدم تخزين SQLite محليًا؛ مزامنة البيانات مع الويب أو الآيفون ليست مضمونة لمجرد أن التطبيق المكتبي يعمل.
+- لا تستخدم بيانات العملاء الفعلية قبل اختبار الصلاحيات والنسخ الاحتياطي والاسترجاع.
+- راجع تبعيات المشروع وأي تحذيرات أمنية قبل توزيع البرنامج على أجهزة أخرى.
