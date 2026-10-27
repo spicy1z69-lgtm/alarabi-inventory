@@ -451,15 +451,24 @@ function InventoryApp({ user }: { user: AppUser }) {
   }, [quickSearchQuery, products, invoices, quotes, cashEntries, stockMovements])
 
   useEffect(() => {
+    const openQuickSearch = () => {
+      setQuickSearchQuery('')
+      setQuickSearchOpen(true)
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setQuickSearchOpen(true)
+        openQuickSearch()
       }
       if (event.key === 'Escape') setQuickSearchOpen(false)
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    // Packaged Windows builds route the shortcut through Electron's main process.
+    const unsubscribe = window.alarabiDesktop?.onQuickSearchShortcut(openQuickSearch)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      unsubscribe?.()
+    }
   }, [])
 
   const filteredInvoices = useMemo(() => {
