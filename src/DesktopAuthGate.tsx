@@ -21,7 +21,16 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true
     const { data: listener } = supabase.auth.onAuthStateChange(event => {
-      if (active && event === 'PASSWORD_RECOVERY') setMode('recovery')
+      if (!active) return
+      if (event === 'PASSWORD_RECOVERY') setMode('recovery')
+      if (event === 'SIGNED_OUT') {
+        setUnlocked(false)
+        if (desktop && window.alarabiDesktop) {
+          void window.alarabiDesktop.lockSession().catch(() => {
+            setError('تم تسجيل الخروج، لكن تعذر تأكيد قفل التخزين المحلي. أغلق التطبيق وافتحه مرة أخرى.')
+          })
+        }
+      }
     })
     void (async () => {
       try {
