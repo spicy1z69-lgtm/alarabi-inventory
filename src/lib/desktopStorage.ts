@@ -6,6 +6,7 @@ declare global {
       isDesktop: boolean
       readAllState: () => Promise<DesktopStateRow[]>
       writeState: (key: string, value: unknown) => Promise<{ ok: boolean }>
+      printHtml: (html: string) => Promise<{ ok: boolean }>
     }
   }
 }
