@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs/promises')
 const Database = require('better-sqlite3')
 const crypto = require('node:crypto')
 
@@ -221,17 +222,37 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
         return true
       })()
     `, true)
-    await new Promise((resolve, reject) => {
-      if (printWindow.isDestroyed() || printWindow.webContents.isDestroyed()) {
-        reject(new Error('نافذة الطباعة اتقفلت قبل بدء الطباعة.'))
-        return
-      }
-      printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
-        if (!success) reject(new Error(failureReason || 'لم يتم فتح نافذة الطباعة. تأكد من اتصال الطابعة أو وجود طابعة PDF.'))
-        else resolve()
+    try {
+      await new Promise((resolve, reject) => {
+        if (printWindow.isDestroyed() || printWindow.webContents.isDestroyed()) {
+          reject(new Error('نافذة الطباعة اتقفلت قبل بدء الطباعة.'))
+          return
+        }
+        printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+          if (!success) reject(new Error(failureReason || 'لم يتم فتح نافذة الطباعة.'))
+          else resolve()
+        })
       })
-    })
-    return { ok: true }
+      return { ok: true }
+    } catch (printError) {
+      // Chromium may fail to enumerate Windows printers when the spooler or
+      // printer drivers are unavailable. Keep invoices usable by offering PDF export.
+      const pdf = await printWindow.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: true,
+      })
+      const saveResult = await dialog.showSaveDialog(parent || printWindow, {
+        title: 'حفظ الفاتورة كملف PDF',
+        defaultPath: 'فاتورة.pdf',
+        buttonLabel: 'حفظ PDF',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { ok: false, cancelled: true }
+      }
+      await fs.writeFile(saveResult.filePath, pdf)
+      return { ok: true, savedAsPdf: true, filePath: saveResult.filePath }
+    }
   } catch (error) {
     if (!printWindow.isDestroyed()) printWindow.close()
     throw new Error('فشل فتح نافذة طباعة الفاتورة: ' + (error instanceof Error ? error.message : String(error)))
