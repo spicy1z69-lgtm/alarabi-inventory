@@ -553,8 +553,17 @@ function InventoryApp({ user }: { user: User }) {
       setNotice('نسبة الضريبة يجب أن تكون بين 0 و100')
       return
     }
-    if (!Number.isFinite(Number(invoicePaid)) || Number(invoicePaid) < 0) {
-      setNotice('المبلغ المدفوع يجب ألا يكون سالبًا')
+    const paidInput = Number(invoicePaid)
+    if (invoiceStatus !== 'paid' && (!invoicePaid.trim() || !Number.isFinite(paidInput) || paidInput < 0)) {
+      setNotice('المبلغ المدفوع لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
+      return
+    }
+    if (invoiceStatus !== 'paid' && paidInput > invoiceTotal) {
+      setNotice('المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة')
+      return
+    }
+    if (!Number.isFinite(invoiceDiscountValue) || invoiceDiscountValue < 0) {
+      setNotice('الخصم لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
       return
     }
 
