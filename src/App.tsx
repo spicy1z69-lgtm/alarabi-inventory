@@ -1475,7 +1475,9 @@ function InventoryApp({ user }: { user: User }) {
       {productModal && (
         <div
           className="modal-backdrop"
-          onClick={() => setProductModal(null)}
+          // Keep the editor open if a click lands outside the panel accidentally.
+          // Close explicitly with Cancel or the close button.
+          onClick={event => { if (event.target === event.currentTarget) event.preventDefault() }}
         >
           <section className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
