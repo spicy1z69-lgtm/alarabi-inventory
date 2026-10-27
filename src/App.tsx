@@ -1241,10 +1241,20 @@ function InventoryApp({ user }: { user: User }) {
                             className="icon-btn delete"
                             aria-label="حذف"
                             onClick={() => {
+                              const usedInInvoice = invoices.some(invoice =>
+                                (invoice.items || []).some(item => item.productId === p.id)
+                              )
+                              const usedInQuote = quotes.some(quote =>
+                                (quote.items || []).some(item => item.productId === p.id)
+                              )
+                              const usedInMovement = stockMovements.some(movement => movement.productId === p.id)
+
+                              if (usedInInvoice || usedInQuote || usedInMovement) {
+                                setNotice('لا يمكن حذف الصنف لأنه مرتبط بفواتير أو عروض أسعار أو سجل حركة المخزون. احتفظ به لحماية السجلات السابقة، ويمكنك تعديل بياناته بدلًا من حذفه.')
+                                return
+                              }
                               if (confirm(`حذف الصنف ${p.name}؟`)) {
-                                setProducts(old =>
-                                  old.filter(x => x.id !== p.id)
-                                )
+                                setProducts(old => old.filter(x => x.id !== p.id))
                               }
                             }}
                           >
