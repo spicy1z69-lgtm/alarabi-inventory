@@ -6,6 +6,11 @@ declare global {
       isDesktop: boolean
       verifySession: (accessToken: string) => Promise<{ ok: boolean; userId?: string; reason?: string }>
       lockSession: () => Promise<{ ok: boolean }>
+      localAuthStatus: () => Promise<{ hasUser: boolean; session: { ownerId: string; username: string } | null }>
+      localSignUp: (username: string, password: string) => Promise<{ ok: boolean; session: { ownerId: string; username: string } }>
+      localLogin: (username: string, password: string) => Promise<{ ok: boolean; session: { ownerId: string; username: string } }>
+      localSession: () => Promise<{ ownerId: string; username: string } | null>
+      localLogout: () => Promise<{ ok: boolean }>
       readAllState: () => Promise<DesktopStateRow[]>
       writeState: (key: string, value: unknown) => Promise<{ ok: boolean }>
       printHtml: (html: string) => Promise<{ ok: boolean }>
@@ -15,6 +20,11 @@ declare global {
 
 export const isDesktopApp = (): boolean =>
   typeof window !== 'undefined' && window.alarabiDesktop?.isDesktop === true
+
+export async function getDesktopLocalSession(): Promise<{ ownerId: string; username: string } | null> {
+  if (!isDesktopApp()) return null
+  return window.alarabiDesktop!.localSession()
+}
 
 export async function readDesktopState(): Promise<Map<string, unknown>> {
   if (!isDesktopApp()) throw new Error('Local desktop storage is not available')
