@@ -205,23 +205,36 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
       'document.open(); document.write(' + JSON.stringify(html) + '); document.close(); true',
       true,
     )
-    await new Promise(resolve => {
-      if (printWindow.webContents.isLoading()) {
-        printWindow.webContents.once('did-finish-load', resolve)
-      } else {
-        setTimeout(resolve, 350)
-      }
-    })
+    // document.write() does not reliably trigger a new did-finish-load event.
+    // Wait for fonts and images explicitly before opening the native print dialog.
+    await printWindow.webContents.executeJavaScript(`
+      (async () => {
+        if (document.fonts && document.fonts.ready) await document.fonts.ready
+        await Promise.all(Array.from(document.images || []).map(img => {
+          if (img.complete) return Promise.resolve()
+          return new Promise(resolve => {
+            img.onload = resolve
+            img.onerror = resolve
+          })
+        }))
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        return true
+      })()
+    `, true)
     await new Promise((resolve, reject) => {
+      if (printWindow.isDestroyed() || printWindow.webContents.isDestroyed()) {
+        reject(new Error('نافذة الطباعة اتقفلت قبل بدء الطباعة.'))
+        return
+      }
       printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
-        if (!success) reject(new Error(failureReason || 'Print dialog did not open'))
+        if (!success) reject(new Error(failureReason || 'لم يتم فتح نافذة الطباعة. تأكد من اتصال الطابعة أو وجود طابعة PDF.'))
         else resolve()
       })
     })
     return { ok: true }
   } catch (error) {
     if (!printWindow.isDestroyed()) printWindow.close()
-    throw error
+    throw new Error('فشل فتح نافذة طباعة الفاتورة: ' + (error instanceof Error ? error.message : String(error)))
   }
 })
 
