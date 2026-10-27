@@ -879,7 +879,7 @@ function InventoryApp({ user }: { user: AppUser }) {
 
         <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} data-tutorial-target="reports" onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
         <button className="nav-item" onClick={() => { setTutorialStep(0); setTab('dashboard') }}>📘 شرح البرنامج</button>
-        <button data-tutorial-target="account" className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
+        <button data-tutorial-target="account" className="nav-item" onClick={() => { if (isDesktopApp()) void window.alarabiDesktop!.localLogout().then(() => window.location.reload()); else void supabase.auth.signOut() }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
           <small>v1.0.0</small>
