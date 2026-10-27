@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
+const { pathToFileURL } = require('node:url')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 
@@ -46,6 +47,31 @@ function registerDatabaseHandlers() {
     return { ok: true }
   })
 }
+
+ipcMain.handle('invoice:print-html', async (event, html) => {
+  if (typeof html !== 'string' || html.length > 5_000_000) {
+    throw new Error('Invalid print document')
+  }
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  const printWindow = new BrowserWindow({
+    width: 1000,
+    height: 800,
+    show: true,
+    autoHideMenuBar: true,
+    parent: parent || undefined,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  })
+  await printWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+  await new Promise(resolve => setTimeout(resolve, 250))
+  printWindow.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+    if (!success) console.error('Invoice print failed:', failureReason)
+  })
+  return { ok: true }
+})
 
 function createWindow() {
   const win = new BrowserWindow({
