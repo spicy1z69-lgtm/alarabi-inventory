@@ -1,6 +1,6 @@
 
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { getDesktopLocalSession, isDesktopApp, readDesktopState, writeDesktopState } from './lib/desktopStorage'
@@ -183,6 +183,8 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [debtPaymentAmount, setDebtPaymentAmount] = useState('')
   const [debtPaymentNote, setDebtPaymentNote] = useState('')
   const [debtSearch, setDebtSearch] = useState('')
+  const supplierPaymentLock = useRef(false)
+  useEffect(() => { if (!payingDebtId) supplierPaymentLock.current = false }, [payingDebtId])
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => [])
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
@@ -344,8 +346,10 @@ function InventoryApp({ user }: { user: AppUser }) {
     setNotice('تم تسجيل دين المورد وحفظه في السجل')
   }
   const recordSupplierDebtPayment = () => {
+    if (supplierPaymentLock.current) return
     const debt = supplierDebts.find(item => item.id === payingDebtId); const amount = Number(debtPaymentAmount)
     if (!debt || !Number.isFinite(amount) || amount <= 0 || amount > debtRemaining(debt)) { setNotice('اكتب مبلغ سداد صحيح لا يتجاوز المتبقي'); return }
+    supplierPaymentLock.current = true
     const paymentId = crypto.randomUUID(); const payment = { id: paymentId, amount, date: today(), note: debtPaymentNote.trim() }
     setSupplierDebts(old => old.map(item => item.id === debt.id ? { ...item, payments: [...(item.payments || []), payment] } : item))
     setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount, category: 'سداد دين مورد', note: `${debt.supplier}${debt.reference ? ' — ' + debt.reference : ''}${debtPaymentNote.trim() ? ' — ' + debtPaymentNote.trim() : ''}`, date: today(), supplierDebtPaymentId: paymentId }, ...old])
