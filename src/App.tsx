@@ -653,7 +653,7 @@ function InventoryApp({ user }: { user: AppUser }) {
     const quantity = Number(movementQuantity)
     if (!Number.isFinite(quantity) || quantity <= 0) { setNotice('اكتب كمية أكبر من صفر'); return }
     if (movementKind === 'out' && quantity > product.quantity) {
-      setNotice('الكمية المطلوبة أكبر من الرصيد الحالي (' + product.quantity + ')')
+      setNotice('الكمية المطلوبة أكبر من الكمية الحالية (' + product.quantity + ')')
       return
     }
     if (!movementReason.trim()) { setNotice('اكتب سبب الحركة'); return }
@@ -674,7 +674,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       quantityAfter,
     }, ...old])
     setStockMovementModal(false)
-    setNotice(movementKind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الرصيد' : 'تم تسجيل خروج البضاعة وتحديث الرصيد')
+    setNotice(movementKind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الكمية' : 'تم تسجيل خروج البضاعة وتحديث الكمية')
   }
   const addQuoteRow = (p: Product) => {
     setQuoteRows(old => {
@@ -1406,7 +1406,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               {stockMovements.filter(m => (!query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())) && (movementKindFilter === 'all' || m.kind === movementKindFilter) && (!movementFromDate || m.date >= movementFromDate) && (!movementToDate || m.date <= movementToDate)).length ? (
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>التاريخ</th><th>كود الصنف</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>الرصيد قبل</th><th>الرصيد بعد</th><th>السبب</th><th>المرجع</th></tr></thead>
+                    <thead><tr><th>التاريخ</th><th>كود الصنف</th><th>الصنف</th><th>الحركة</th><th>الكمية</th><th>الكمية قبل</th><th>الكمية بعد</th><th>السبب</th><th>المرجع</th></tr></thead>
                     <tbody>
                       {stockMovements.filter(m => (!query.trim() || (m.productName + ' ' + (products.find(p => p.id === m.productId)?.code || '')).toLowerCase().includes(query.trim().toLowerCase())) && (movementKindFilter === 'all' || m.kind === movementKindFilter) && (!movementFromDate || m.date >= movementFromDate) && (!movementToDate || m.date <= movementToDate)).map(movement => (
                         <tr key={movement.id}>
@@ -1689,19 +1689,19 @@ function InventoryApp({ user }: { user: AppUser }) {
         <div className="modal-backdrop" onClick={() => setStockMovementModal(false)}>
           <section className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
-              <div><h2>تسجيل حركة مخزون</h2><p>حدد الصنف ونوع الحركة لتحديث الرصيد وتسجيلها في السجل.</p></div>
+              <div><h2>تسجيل حركة مخزون</h2><p>حدد الصنف ونوع الحركة لتحديث الكمية وتسجيلها في السجل.</p></div>
               <button className="icon-btn" onClick={() => setStockMovementModal(false)} aria-label="إغلاق"><X /></button>
             </div>
             <div className="form-grid">
               <label className="field"><span>الصنف *</span>
                 <select value={movementProductId} onChange={e => setMovementProductId(e.target.value)}>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} (الرصيد: {p.quantity})</option>)}
+                  {products.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name} (الكمية: {p.quantity})</option>)}
                 </select>
               </label>
               <label className="field"><span>نوع الحركة *</span>
                 <select value={movementKind} onChange={e => setMovementKind(e.target.value as 'in' | 'out')}>
-                  <option value="in">دخول بضاعة — إضافة للرصيد</option>
-                  <option value="out">خروج بضاعة — خصم من الرصيد</option>
+                  <option value="in">دخول بضاعة — إضافة للكمية</option>
+                  <option value="out">خروج بضاعة — خصم من الكمية</option>
                 </select>
               </label>
               <Field label="الكمية *" type="number" value={movementQuantity} onChange={setMovementQuantity} placeholder="اكتب الكمية" />
@@ -1709,7 +1709,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Field label="المرجع (اختياري)" value={movementReference} onChange={setMovementReference} placeholder="رقم إذن الصرف أو فاتورة الشراء" />
             </div>
             {products.find(p => p.id === movementProductId) && (
-              <p className="muted" style={{ marginTop: 12 }}>الرصيد الحالي: <strong>{products.find(p => p.id === movementProductId)?.quantity}</strong> — بعد الحركة: <strong>{(products.find(p => p.id === movementProductId)?.quantity ?? 0) + (movementKind === 'in' ? 1 : -1) * (Number(movementQuantity) > 0 ? Number(movementQuantity) : 0)}</strong></p>
+              <p className="muted" style={{ marginTop: 12 }}>الكمية الحالية: <strong>{products.find(p => p.id === movementProductId)?.quantity}</strong> — بعد الحركة: <strong>{(products.find(p => p.id === movementProductId)?.quantity ?? 0) + (movementKind === 'in' ? 1 : -1) * (Number(movementQuantity) > 0 ? Number(movementQuantity) : 0)}</strong></p>
             )}
             <div className="modal-actions">
               <button className="secondary-btn" onClick={() => setStockMovementModal(false)}>إلغاء</button>
