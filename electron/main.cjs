@@ -280,6 +280,14 @@ function createWindow() {
     },
   })
   win.webContents.on('destroyed', () => authenticatedContents.delete(win.webContents.id))
+  // Electron may not deliver Ctrl+K reliably through DOM keydown in packaged Windows builds.
+  // Intercept it at the main-process boundary and notify the renderer through the narrow preload API.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key.toLowerCase() === 'k' && (input.control || input.meta)) {
+      event.preventDefault()
+      win.webContents.send('shortcut:quick-search')
+    }
+  })
   const devUrl = process.env.VITE_DEV_SERVER_URL
   if (devUrl) win.loadURL(devUrl)
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
