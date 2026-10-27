@@ -433,6 +433,10 @@ function InventoryApp({ user }: { user: User }) {
       setNotice('كود الصنف موجود بالفعل. استخدم كودًا مختلفًا')
       return
     }
+    if (editingId && !products.some(p => p.id === editingId)) {
+      setNotice('الصنف الذي تحاول تعديله لم يعد موجودًا. حدّث القائمة وحاول مرة أخرى')
+      return
+    }
 
     const item: Product = {
       id: editingId ?? crypto.randomUUID(),
