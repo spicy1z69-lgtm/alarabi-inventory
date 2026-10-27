@@ -1,5 +1,4 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
-const { randomBytes, scryptSync, timingSafeEqual } = require('node:crypto')
 const { pathToFileURL } = require('node:url')
 const path = require('node:path')
 const Database = require('better-sqlite3')
@@ -24,13 +23,6 @@ function initializeDatabase() {
       state_value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS local_auth (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      username TEXT NOT NULL,
-      salt TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
       applied_at TEXT NOT NULL
@@ -39,37 +31,21 @@ function initializeDatabase() {
 }
 
 function registerAuthHandlers() {
-  ipcMain.handle('auth:status', () => {
-    const row = db.prepare('SELECT username FROM local_auth WHERE id = 1').get()
-    return { configured: Boolean(row), username: row?.username || '' }
-  })
-
-  ipcMain.handle('auth:setup', (event, username, password) => {
-    if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,40}$/.test(username.trim())) {
-      throw new Error('اسم المستخدم لازم يكون من 3 إلى 40 حرفًا إنجليزيًا أو رقمًا.')
+  ipcMain.handle('auth:verify-session', async (event, accessToken) => {
+    if (typeof accessToken !== 'string' || accessToken.length < 20 || accessToken.length > 10000) {
+      return { ok: false }
     }
-    if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
-      throw new Error('كلمة المرور لازم تكون 8 أحرف على الأقل.')
-    }
-    const existing = db.prepare('SELECT id FROM local_auth WHERE id = 1').get()
-    if (existing) throw new Error('تم إعداد حساب المحل بالفعل. سجّل الدخول.')
-    const salt = randomBytes(16).toString('hex')
-    const passwordHash = scryptSync(password, salt, 64).toString('hex')
-    db.prepare('INSERT INTO local_auth (id, username, salt, password_hash, created_at) VALUES (1, ?, ?, ?, ?)')
-      .run(username.trim(), salt, passwordHash, new Date().toISOString())
+    const response = await fetch('https://dppvlphuctpdszumnllc.supabase.co/auth/v1/user', {
+      headers: {
+        apikey: 'sb_publishable_7pl_sabI8HUQ0kNYgZYZ_g_WONIhxrd',
+        Authorization: 'Bearer ' + accessToken,
+      },
+    })
+    if (!response.ok) return { ok: false }
+    const user = await response.json()
+    if (!user || typeof user.id !== 'string') return { ok: false }
     authenticatedContents.add(event.sender.id)
-    return { ok: true }
-  })
-
-  ipcMain.handle('auth:login', (event, username, password) => {
-    if (typeof username !== 'string' || typeof password !== 'string') return { ok: false }
-    const row = db.prepare('SELECT username, salt, password_hash FROM local_auth WHERE id = 1').get()
-    if (!row || row.username !== username.trim()) return { ok: false }
-    const candidate = scryptSync(password, row.salt, 64)
-    const stored = Buffer.from(row.password_hash, 'hex')
-    const ok = stored.length === candidate.length && timingSafeEqual(stored, candidate)
-    if (ok) authenticatedContents.add(event.sender.id)
-    return { ok }
+    return { ok: true, userId: user.id }
   })
 }
 
