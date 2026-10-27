@@ -2144,11 +2144,11 @@ export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
   const [checking, setChecking] = useState(true)
   const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [guestBusy, setGuestBusy] = useState(false)
   useEffect(() => {
     if (isDesktopApp()) {
       let active = true
@@ -2164,21 +2164,22 @@ export default function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setBusy(true); setMessage('')
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      : await supabase.auth.signUp({ email: email.trim(), password })
-    setBusy(false)
-    if (result.error) setMessage(result.error.message)
-    else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
-    else setMessage('تم تسجيل الدخول بنجاح.')
-  }
-  const signInAsGuest = async () => {
-    setGuestBusy(true)
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
     setMessage('')
-    const { error } = await supabase.auth.signInAnonymously()
-    setGuestBusy(false)
-    if (error) setMessage('تعذر الدخول كزائر: ' + error.message)
+    try {
+      const result = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        : await supabase.auth.signUp({ email: email.trim(), password, options: { data: { username: username.trim() } } })
+      if (result.error) setMessage(result.error.message)
+      else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
+      else setMessage('تم تسجيل الدخول بنجاح.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'حصل خطأ غير متوقع. حاول مرة أخرى.')
+    } finally {
+      setBusy(false)
+    }
   }
   if (checking) return <div className="auth-page"><div className="auth-card">جارٍ التحقق من تسجيل الدخول...</div></div>
   if (user) return <InventoryApp user={user} />
@@ -2186,14 +2187,11 @@ export default function App() {
     <div className="auth-mark"><Boxes size={30} /></div>
     <h1>العربي لأنظمة التأريض والحماية من الصواعق</h1>
     <p>سجّل الدخول للوصول إلى المخزون والفواتير وعروض الأسعار من أي جهاز.</p>
-    <label>البريد الإلكتروني<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
-    <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="6 أحرف على الأقل" /></label>
+    {mode === 'signup' && <label>اسم المستخدم<input type="text" autoComplete="nickname" minLength={3} maxLength={40} required value={username} onChange={e => setUsername(e.target.value)} placeholder="اسم يظهر في حسابك" /></label>}
+    <label>البريد الإلكتروني<input type="email" autoComplete="email" maxLength={254} required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
+    <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} maxLength={256} required value={password} onChange={e => setPassword(e.target.value)} placeholder="8 أحرف على الأقل" /></label>
     {message && <div className="auth-message">{message}</div>}
-    <button className="primary-btn auth-submit" disabled={busy || guestBusy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
-    {mode === 'login' && <>
-      <div className="auth-divider"><span>أو</span></div>
-      <button type="button" className="guest-btn" disabled={busy || guestBusy} onClick={signInAsGuest}>{guestBusy ? 'جارٍ الدخول كزائر...' : 'الدخول كزائر بدون إيميل أو باسورد'}</button>
-    </>}
+    <button className="primary-btn auth-submit" disabled={busy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
     <button type="button" className="text-button auth-toggle" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? 'أول مرة؟ أنشئ حسابًا' : 'لديك حساب؟ سجّل الدخول'}</button>
   </form></div>
 }
