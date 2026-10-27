@@ -14,6 +14,7 @@ import {
 import type { Product, Quote, QuoteItem, Invoice } from './types'
 
 const COMPANY = 'العربي لأنظمة التأريض والحماية من الصواعق'
+const INVOICE_COMPANY = 'العربي لأنظمة التأريض'
 
 const seed: Product[] = [
   {
@@ -175,6 +176,8 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [cashCategory, setCashCategory] = useState('')
   const [cashNote, setCashNote] = useState('')
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
   const [invoiceCustomer, setInvoiceCustomer] = useState('')
   const [invoicePhone, setInvoicePhone] = useState('')
   const [invoiceDueDate, setInvoiceDueDate] = useState('')
@@ -449,15 +452,24 @@ function InventoryApp({ user }: { user: AppUser }) {
   }, [quickSearchQuery, products, invoices, quotes, cashEntries, stockMovements])
 
   useEffect(() => {
+    const openQuickSearch = () => {
+      setQuickSearchQuery('')
+      setQuickSearchOpen(true)
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setQuickSearchOpen(true)
+        openQuickSearch()
       }
       if (event.key === 'Escape') setQuickSearchOpen(false)
     }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    // Packaged Windows builds route the shortcut through Electron's main process.
+    const unsubscribe = window.alarabiDesktop?.onQuickSearchShortcut(openQuickSearch)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      unsubscribe?.()
+    }
   }, [])
 
   const filteredInvoices = useMemo(() => {
@@ -824,12 +836,18 @@ function InventoryApp({ user }: { user: AppUser }) {
   }
 
   const recordInvoicePayment = (invoice: Invoice) => {
+    const balance = Math.max(0, invoiceTotalFor(invoice) - Math.max(0, invoice.paidAmount || 0))
+    if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
+    setPaymentInvoice(invoice)
+    setPaymentAmount(String(balance))
+  }
+
+  const confirmInvoicePayment = () => {
+    if (!paymentInvoice) return
+    const invoice = paymentInvoice
     const total = invoiceTotalFor(invoice)
     const balance = Math.max(0, total - Math.max(0, invoice.paidAmount || 0))
-    if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
-    const rawAmount = window.prompt('المتبقي على الفاتورة ' + money(balance) + '. اكتب مبلغ التحصيل:')
-    if (rawAmount === null) return
-    const amount = Number(rawAmount)
+    const amount = Number(paymentAmount)
     if (!Number.isFinite(amount) || amount <= 0) { setNotice('اكتب مبلغ تحصيل صحيحًا أكبر من صفر'); return }
     if (amount > balance) { setNotice('مبلغ التحصيل أكبر من المتبقي على الفاتورة'); return }
     const payment = { id: crypto.randomUUID(), kind: 'in' as const, amount, category: 'تحصيل فاتورة', note: 'تحصيل ' + invoice.number + ' — ' + invoice.customer, date: today(), invoiceId: invoice.id }
@@ -839,6 +857,8 @@ function InventoryApp({ user }: { user: AppUser }) {
       const paidAmount = Math.min(total, Math.max(0, item.paidAmount || 0) + amount)
       return { ...item, paidAmount, status: paidAmount >= total ? 'paid' : 'partial' }
     }))
+    setPaymentInvoice(null)
+    setPaymentAmount('')
     setNotice('تم تسجيل التحصيل وتحديث الفاتورة والخزنة معًا')
   }
 
@@ -1838,6 +1858,25 @@ function InventoryApp({ user }: { user: AppUser }) {
         </div>
       )}
 
+      {paymentInvoice && (
+        <div className="modal-backdrop" onClick={() => setPaymentInvoice(null)}>
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <div><h2 id="payment-modal-title">تحصيل دفعة من فاتورة</h2><p>فاتورة {paymentInvoice.number} — {paymentInvoice.customer}</p></div>
+              <button className="icon-btn" aria-label="إغلاق" onClick={() => setPaymentInvoice(null)}><X /></button>
+            </div>
+            <div className="form-grid">
+              <div className="field"><span>المتبقي على الفاتورة</span><strong>{money(Math.max(0, invoiceTotalFor(paymentInvoice) - Math.max(0, paymentInvoice.paidAmount || 0)))}</strong></div>
+              <Field label="مبلغ التحصيل بالجنيه *" type="number" value={paymentAmount} onChange={setPaymentAmount} placeholder="اكتب مبلغ التحصيل" />
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-btn" onClick={() => setPaymentInvoice(null)}>إلغاء</button>
+              <button className="primary-btn" onClick={confirmInvoicePayment}><Check size={17} /> تأكيد التحصيل</button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {cashModal && (
         <div className="modal-backdrop" onClick={() => setCashModal(false)}><section className="modal" onClick={e => e.stopPropagation()}><div className="modal-head"><div><h2>تسجيل حركة مالية</h2><p>سجّل المقبوضات والمصروفات</p></div><button className="icon-btn" onClick={() => setCashModal(false)}><X /></button></div><div className="form-grid"><label className="field"><span>نوع الحركة</span><select value={cashKind} onChange={e => setCashKind(e.target.value as 'in' | 'out')}><option value="in">مبلغ داخل</option><option value="out">مبلغ خارج (مصروف)</option></select></label><Field label="المبلغ بالجنيه *" type="number" value={cashAmount} onChange={setCashAmount} placeholder="0.00" /><Field label="البند *" value={cashCategory} onChange={setCashCategory} placeholder="مثال: تحصيل عميل أو مصروف نقل" /><Field label="ملاحظات" value={cashNote} onChange={setCashNote} placeholder="تفاصيل إضافية (اختياري)" /></div><div className="modal-actions"><button className="secondary-btn" onClick={() => setCashModal(false)}>إلغاء</button><button className="primary-btn" onClick={addCashEntry}><Check size={17} /> حفظ الحركة</button></div></section></div>
       )}
@@ -1978,7 +2017,7 @@ function invoiceHtml(invoice: Invoice) {
   const statusTextColor = invoice.status === 'paid' ? '#26744d' : invoice.status === 'partial' ? '#8c641c' : '#a23e39'
   return '<!doctype html>' +
 '<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + COMPANY + '</title><style>' +
+'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + INVOICE_COMPANY + '</title><style>' +
 ':root{--navy:#173653;--blue:#245b80;--pale:#eef4f8;--line:#d9e2e9;--ink:#253746;--muted:#647787}' +
 '*{box-sizing:border-box}html{background:#eef1f4}body{font-family:Tahoma,Arial,sans-serif;color:var(--ink);margin:0;padding:28px;background:#eef1f4;font-size:13px;line-height:1.7}' +
 '.sheet{width:100%;max-width:850px;min-height:1050px;margin:0 auto;background:#fff;padding:42px 46px;box-shadow:0 18px 55px rgba(20,43,61,.14);border:1px solid #e1e8ee;position:relative;overflow:hidden}' +
@@ -1995,14 +2034,14 @@ function invoiceHtml(invoice: Invoice) {
 '@page{size:A4;margin:12mm}@media print{html,body{background:#fff;padding:0;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{width:100%;max-width:none;min-height:0;margin:0;padding:8mm 7mm;box-shadow:none;overflow:visible}.head,.details,.bottom-grid,.signatures,.footer{break-inside:avoid}tr{break-inside:avoid}}' +
 '@media(max-width:600px){body{padding:10px}.sheet{padding:28px 18px;min-height:0}.head{align-items:flex-start;flex-direction:column}.brand-lockup{gap:10px}.company-logo{width:72px;height:66px}.company-name{font-size:17px}.doc-badge{align-self:flex-end}.details{grid-template-columns:1fr 1fr;gap:7px}.detail-card{padding:10px}.bottom-grid{grid-template-columns:1fr}.signatures{gap:20px}table{font-size:10px}th,td{padding:8px 5px}}' +
 '</style></head><body><div class="actions"><button onclick="window.print()">طباعة الفاتورة / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
-'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + COMPANY + '</h1><div class="company-sub">EARTHING &amp; LIGHTNING PROTECTION</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
+'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + INVOICE_COMPANY + '</h1><div class="company-sub">EARTHING SYSTEMS</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
 '<section class="title-row"><h2>فاتورة بيع</h2><div class="invoice-no">رقم الفاتورة<br><b>' + escapeHtml(invoice.number) + '</b></div></section>' +
 '<section class="details"><div class="detail-card"><h3>بيانات العميل</h3><div class="value">' + escapeHtml(invoice.customer) + '</div><div class="subvalue">رقم الهاتف: ' + escapeHtml(invoice.phone || 'غير مسجل') + '</div></div>' +
 '<div class="detail-card"><h3>بيانات الفاتورة</h3><div class="value">' + dateLabel + '</div><div class="subvalue">تاريخ الاستحقاق: ' + dueDateLabel + '</div><div class="subvalue">حالة السداد: <span class="status">' + statusLabel + '</span></div></div></section>' +
 '<h3 class="section-title">تفاصيل الأصناف</h3><table><thead><tr><th class="num">م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
 '<section class="bottom-grid"><div class="notes"><h3>ملاحظات وشروط</h3>' + noteHtml + '</div><div class="totals">' +
 '<div class="total-line"><span>إجمالي الأصناف</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(invoice.discount) + '</b></div><div class="total-line"><span>الضريبة (' + invoice.tax + '%)</span><b>' + money(taxAmount) + '</b></div><div class="total-line grand"><span>الإجمالي النهائي</span><b>' + money(total) + '</b></div><div class="total-line"><span>المبلغ المدفوع</span><b>' + money(invoice.paidAmount) + '</b></div><div class="total-line balance"><span>المتبقي</span><b>' + money(balance) + '</b></div></div></section>' +
-'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
+'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + INVOICE_COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
 }
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
