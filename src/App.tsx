@@ -404,27 +404,49 @@ function InventoryApp({ user }: { user: User }) {
   }
 
   const saveProduct = () => {
-    if (!draft.code.trim() || !draft.name.trim()) {
+    const code = draft.code.trim()
+    const name = draft.name.trim()
+    if (!code || !name) {
       setNotice('اكتب كود الصنف واسم الصنف الأول')
       return
     }
 
+    const numericFields = [
+      { label: 'الكمية', value: draft.quantity },
+      { label: 'سعر البيع', value: draft.price },
+      { label: 'سعر التكلفة', value: draft.costPrice },
+      { label: 'حد التنبيه', value: draft.minStock },
+    ]
+    for (const field of numericFields) {
+      const value = Number(field.value)
+      if (!field.value.trim() || !Number.isFinite(value) || value < 0) {
+        setNotice(field.label + ' لازم يكون رقم صحيح أو صفر فأكثر')
+        return
+      }
+    }
+
+    const editingId = productModal !== 'new' && productModal ? productModal.id : null
+    const duplicateCode = products.some(
+      p => p.id !== editingId && p.code.trim().toLocaleLowerCase() === code.toLocaleLowerCase()
+    )
+    if (duplicateCode) {
+      setNotice('كود الصنف موجود بالفعل. استخدم كودًا مختلفًا')
+      return
+    }
+
     const item: Product = {
-      id:
-        productModal !== 'new' && productModal
-          ? productModal.id
-          : crypto.randomUUID(),
-      code: draft.code.trim(),
-      name: draft.name.trim(),
+      id: editingId ?? crypto.randomUUID(),
+      code,
+      name,
       category: draft.category.trim() || 'عام',
-      quantity: Math.max(0, Number(draft.quantity) || 0),
-      price: Math.max(0, Number(draft.price) || 0),
-      costPrice: Math.max(0, Number(draft.costPrice) || 0),
-      minStock: Math.max(0, Number(draft.minStock) || 0),
+      quantity: Number(draft.quantity),
+      price: Number(draft.price),
+      costPrice: Number(draft.costPrice),
+      minStock: Number(draft.minStock),
     }
 
     setProducts(old =>
-      productModal !== 'new' && productModal
+      editingId
         ? old.map(p => (p.id === item.id ? item : p))
         : [item, ...old]
     )
