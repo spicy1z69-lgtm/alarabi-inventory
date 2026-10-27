@@ -14,6 +14,7 @@ declare global {
       readAllState: () => Promise<DesktopStateRow[]>
       writeState: (key: string, value: unknown) => Promise<{ ok: boolean }>
       printHtml: (html: string) => Promise<{ ok: boolean }>
+      savePreviewPdf: () => Promise<{ ok: boolean; savedAsPdf?: boolean; cancelled?: boolean; filePath?: string }>
     }
   }
 }
