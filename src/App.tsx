@@ -737,7 +737,7 @@ function InventoryApp({ user }: { user: AppUser }) {
   const printDocument = (html: string, documentName: string) => {
     if (isDesktopApp() && window.alarabiDesktop?.printHtml) {
       void window.alarabiDesktop.printHtml(html)
-        .then(() => setNotice('تم فتح نافذة طباعة ' + documentName))
+        .then(() => setNotice('تم فتح معاينة ' + documentName + ' — تقدر تحفظها PDF من زر الحفظ داخل النافذة'))
         .catch(error => setNotice('تعذرت طباعة ' + documentName + ': ' + String(error)))
       return
     }
