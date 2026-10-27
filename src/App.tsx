@@ -236,10 +236,16 @@ function InventoryApp({ user }: { user: User }) {
           record.setter(cloudValue as never)
           if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem(record.localKey, JSON.stringify(cloudValue))
         } else {
-          const localValue = isOwnerAccount ? load(record.localKey, record.fallback) : record.fallback
+          const localValue = isDesktopApp()
+            ? record.fallback
+            : isOwnerAccount
+              ? load(record.localKey, record.fallback)
+              : record.fallback
           record.setter(localValue as never)
-          const { error: saveError } = await supabase.from('app_state').upsert({ owner_id: user.id, state_key: record.key, state_value: localValue, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' })
-          if (saveError && active) setCloudError('تعذر رفع البيانات الحالية: ' + saveError.message)
+          if (!isDesktopApp()) {
+            const { error: saveError } = await supabase.from('app_state').upsert({ owner_id: user.id, state_key: record.key, state_value: localValue, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' })
+            if (saveError && active) setCloudError('تعذر رفع البيانات الحالية: ' + saveError.message)
+          }
         }
       }
       if (active) setCloudLoaded(true)
