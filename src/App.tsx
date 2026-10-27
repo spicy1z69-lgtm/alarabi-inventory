@@ -104,6 +104,34 @@ type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'reports'
 
 function InventoryApp({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>('dashboard')
+  const [tutorialStep, setTutorialStep] = useState<number | null>(null)
+  const tutorialSteps = [
+    { title: 'أهلاً بيك في برنامج العربي 👋', text: 'هنمشي سوا خطوة خطوة ونعرفك كل جزء في البرنامج. متقلقش، الشرح بسيط وبالعامية المصرية، ومش هيغيّر أي بيانات عندك.', tab: 'dashboard' as Tab },
+    { title: '١- لوحة التحكم', text: 'دي الصفحة الرئيسية. منها هتاخد نظرة سريعة على حالة المخزون، الأصناف اللي قربت تخلص، وأرقام المبيعات والحركة المالية حسب البيانات المسجلة.', tab: 'dashboard' as Tab },
+    { title: '٢- الأصناف والمخزون', text: 'هنا بتضيف صنف جديد أو تعدّل صنف موجود. اكتب كود الصنف واسمه وفئته والكمية وسعر البيع والتكلفة وحد التنبيه. راجع الكمية كويس قبل الحفظ.', tab: 'products' as Tab },
+    { title: '٣- عروض الأسعار', text: 'لما عميل يطلب سعر، افتح عروض الأسعار واعمل عرض جديد، اختار الأصناف والكميات، وراجع الإجمالي قبل ما تطبع العرض أو تحفظه PDF.', tab: 'quotes' as Tab },
+    { title: '٤- الفواتير', text: 'بعد تأكيد البيع، سجّل الفاتورة باسم العميل والأصناف والكميات والخصم والضريبة والمبلغ المدفوع. راجع المتبقي وحالة السداد قبل الحفظ.', tab: 'invoices' as Tab },
+    { title: '٥- الخزنة والحركة المالية', text: 'سجّل الفلوس اللي دخلت الخزنة والفلوس اللي خرجت، وحدد المبلغ والبند واكتب ملاحظة لو محتاج. اتأكد من المبلغ قبل ما تسجل الحركة.', tab: 'cash' as Tab },
+    { title: '٦- التقارير والتصدير', text: 'من هنا تراجع التقارير وتحدد الفترة اللي عايز تشوفها، وتصدّر البيانات أو تعمل نسخة احتياطية. احتفظ بالنسخة الاحتياطية في مكان آمن.', tab: 'reports' as Tab },
+    { title: '٧- الحفظ والحسابات', text: 'البيانات بتتحفظ على السحابة للحساب اللي داخل بيه. حساب الضيف ليه بيانات منفصلة عن حساب الإدارة. ما تشاركش كلمة المرور، وقبل استرجاع نسخة احتياطية اتأكد إنها النسخة الصح.', tab: 'dashboard' as Tab },
+    { title: 'كده خلصنا الجولة 🎉', text: 'تقدر تبدأ تستخدم البرنامج. تقدر تفتح الشرح تاني من زر «شرح البرنامج» في القائمة الجانبية، ولو مش فاهم خطوة ارجع لها براحتك.', tab: 'dashboard' as Tab },
+  ]
+  useEffect(() => {
+    const key = 'alarabi-tutorial-completed-' + user.id
+    if (localStorage.getItem(key) !== 'yes') setTutorialStep(0)
+  }, [user.id])
+  const finishTutorial = () => {
+    localStorage.setItem('alarabi-tutorial-completed-' + user.id, 'yes')
+    setTutorialStep(null)
+  }
+  const moveTutorial = (direction: 1 | -1) => {
+    if (tutorialStep === null) return
+    const next = tutorialStep + direction
+    if (next < 0) return
+    if (next >= tutorialSteps.length) { finishTutorial(); return }
+    setTutorialStep(next)
+    setTab(tutorialSteps[next].tab)
+  }
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
   const [reportKind, setReportKind] = useState<'sales' | 'cash' | 'inventory'>('sales')
@@ -720,6 +748,7 @@ function InventoryApp({ user }: { user: User }) {
         </nav>
 
         <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
+        <button className="nav-item" onClick={() => { setTutorialStep(0); setTab('dashboard') }}>📘 شرح البرنامج</button>
         <button className="nav-item" onClick={() => void supabase.auth.signOut()}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
@@ -728,6 +757,21 @@ function InventoryApp({ user }: { user: User }) {
       </aside>
 
       <main className="main">
+        {tutorialStep !== null && <div role="dialog" aria-modal="true" aria-label="شرح البرنامج" style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(10,24,38,.72)', display: 'grid', placeItems: 'center', padding: 18 }}>
+          <section style={{ width: 'min(100%, 520px)', background: '#fff', color: '#18334b', borderRadius: 18, padding: 24, boxShadow: '0 24px 80px rgba(0,0,0,.28)', direction: 'rtl', textAlign: 'right' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+              <span style={{ fontSize: 12, color: '#61788a' }}>جولة تعريفية · {tutorialStep + 1} من {tutorialSteps.length}</span>
+              <button type="button" onClick={finishTutorial} style={{ border: 0, background: '#edf2f6', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', color: '#18334b' }}>اقفل الشرح</button>
+            </div>
+            <div style={{ height: 5, background: '#e7edf2', borderRadius: 9, overflow: 'hidden', marginBottom: 22 }}><div style={{ height: '100%', width: ((tutorialStep + 1) / tutorialSteps.length * 100) + '%', background: '#c4a264', transition: 'width .2s' }} /></div>
+            <h2 style={{ fontSize: 23, margin: '0 0 12px', color: '#173653' }}>{tutorialSteps[tutorialStep].title}</h2>
+            <p style={{ fontSize: 16, lineHeight: 1.9, margin: '0 0 24px', color: '#40576a' }}>{tutorialSteps[tutorialStep].text}</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+              <button type="button" onClick={() => moveTutorial(-1)} disabled={tutorialStep === 0} style={{ border: '1px solid #d7e0e7', background: '#fff', color: '#173653', borderRadius: 9, padding: '11px 16px', cursor: 'pointer', opacity: tutorialStep === 0 ? .45 : 1 }}>السابق</button>
+              <button type="button" onClick={() => moveTutorial(1)} style={{ border: 0, background: '#173653', color: '#fff', borderRadius: 9, padding: '11px 18px', cursor: 'pointer', fontWeight: 700 }}>{tutorialStep === tutorialSteps.length - 1 ? 'يلا نبدأ' : 'التالي'}</button>
+            </div>
+          </section>
+        </div>}
         {!cloudLoaded && <div className="notice">جارٍ تحميل بياناتك من السحابة...</div>}
         {cloudError && <button className="notice" onClick={() => setCloudError('')}>⚠ {cloudError} <X size={15} /></button>}
         <header className="topbar">
