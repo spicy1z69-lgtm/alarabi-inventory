@@ -5,14 +5,17 @@ const STATE_KEYS = new Set([
   'cash',
   'supplier-debts',
   'stock-movements',
+  'operations',
 ])
+
+const LEGACY_STATE_KEYS = new Set([...STATE_KEYS].filter(key => key !== 'operations'))
 
 function validateBundle(ownerId, records) {
   if (typeof ownerId !== 'string' || ownerId.length < 1 || ownerId.length > 128) {
     throw new Error('Invalid state owner')
   }
-  if (!Array.isArray(records) || records.length !== STATE_KEYS.size) {
-    throw new Error('A complete six-record state bundle is required')
+  if (!Array.isArray(records) || (records.length !== STATE_KEYS.size && records.length !== LEGACY_STATE_KEYS.size)) {
+    throw new Error('A complete state bundle is required')
   }
 
   const seen = new Set()
@@ -22,7 +25,7 @@ function validateBundle(ownerId, records) {
       throw new Error('Invalid state record')
     }
     const { key, value } = record
-    if (typeof key !== 'string' || !STATE_KEYS.has(key) || seen.has(key)) {
+    if (typeof key !== 'string' || !(records.length === LEGACY_STATE_KEYS.size ? LEGACY_STATE_KEYS : STATE_KEYS).has(key) || seen.has(key)) {
       throw new Error('Unsupported or duplicate state key')
     }
     seen.add(key)
@@ -35,7 +38,8 @@ function validateBundle(ownerId, records) {
     return { key, stateValue }
   })
 
-  if (seen.size !== STATE_KEYS.size) throw new Error('The state bundle is incomplete')
+  const expected = records.length === LEGACY_STATE_KEYS.size ? LEGACY_STATE_KEYS : STATE_KEYS
+  if (seen.size !== expected.size) throw new Error('The state bundle is incomplete')
   return serialized
 }
 

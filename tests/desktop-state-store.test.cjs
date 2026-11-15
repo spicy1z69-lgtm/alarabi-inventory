@@ -41,6 +41,14 @@ test('saves all six desktop state documents as one owner-scoped bundle', () => {
   assert.equal(JSON.parse(ownerB.state_value)[0].name, 'B')
 })
 
+test('saves the added operations document together while keeping six-document legacy writes compatible', () => {
+  const expanded = [...bundle('A'), { key: 'operations', value: { purchases: [], returns: [], cashCounts: [] } }]
+  assert.equal(writeStateBundle(db, 'local:user-a', expanded).count, 7)
+  assert.equal(writeStateBundle(db, 'local:user-b', bundle('B')).count, 6)
+  const value = db.prepare('SELECT state_value FROM app_state WHERE owner_id = ? AND state_key = ?').get('local:user-a', 'operations')
+  assert.deepEqual(JSON.parse(value.state_value), { purchases: [], returns: [], cashCounts: [] })
+})
+
 test('rolls back earlier writes if any state document fails', () => {
   db.exec(`
     CREATE TRIGGER fail_invoice_write BEFORE INSERT ON app_state
@@ -52,7 +60,7 @@ test('rolls back earlier writes if any state document fails', () => {
 })
 
 test('rejects incomplete or duplicate bundles before writing', () => {
-  assert.throws(() => writeStateBundle(db, 'local:user-a', bundle('A').slice(0, 5)), /complete six-record/)
+  assert.throws(() => writeStateBundle(db, 'local:user-a', bundle('A').slice(0, 5)), /complete state bundle/)
   const invalid = bundle('A')
   invalid[1].key = 'products'
   assert.throws(() => writeStateBundle(db, 'local:user-a', invalid), /duplicate state key/)

@@ -2348,5 +2348,12 @@ kbd { border-color:#654126 !important; background:#2d2119 !important; color:#ffc
 @media (max-width:700px) { .save-indicator { min-height:32px; padding:6px 8px; font-size:10px; } }
 @media (prefers-reduced-motion:reduce) { .saving-spinner { animation:none; border-color:#ffad57; } }
 .quote-totals-strip { border-color:#343b45; background:linear-gradient(110deg,#171d24,#1c222a); color:#f0d29a; }
+.alert-list { display:grid; gap:8px; }
+.alert-row { width:100%; display:flex; align-items:center; gap:9px; padding:11px 13px; border:1px solid #59442f; border-radius:9px; background:#241d17; color:#f5d2a3; text-align:right; cursor:pointer; }
+.alert-row:hover { border-color:#b9773e; background:#302319; }
+.cash-reconcile { display:flex; align-items:end; gap:14px; flex-wrap:wrap; padding:14px; margin:12px 0; border:1px solid #383b3f; border-radius:10px; background:#191b1e; color:#eeeae3; }
+.cash-reconcile .field { min-width:190px; flex:1; }
+.cash-reconcile > span { color:#ffcf9c; padding-bottom:10px; }
+@media (max-width:700px) { .cash-reconcile { align-items:stretch; flex-direction:column; } .cash-reconcile .field { min-width:0; } }
 .quote-date-filter input { min-height:38px; padding:8px 10px; border:1px solid #3b424b; border-radius:8px; background:#151a20; color:#f1ede5; }
 @media (max-width:700px) { .quote-totals-strip { align-items:flex-start; flex-direction:column; } .quote-date-filter { min-width:100%; } }

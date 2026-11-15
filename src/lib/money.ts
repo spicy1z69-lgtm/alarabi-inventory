@@ -15,3 +15,14 @@ export const invoiceTaxFor = (subtotal: number, discount: number, taxRate: numbe
 
 export const invoiceGrandTotalFor = (subtotal: number, discount: number, taxRate: number) =>
   roundMoney(Math.max(0, subtotal - discount) + invoiceTaxFor(subtotal, discount, taxRate))
+
+/** Weighted average purchase cost. When opening stock has no known cost, use the first recorded purchase as its cost baseline. */
+export const weightedAverageCostFor = (oldQuantity: number, oldUnitCost: number, receivedQuantity: number, receivedUnitCost: number) => {
+  if (![oldQuantity, oldUnitCost, receivedQuantity, receivedUnitCost].every(Number.isFinite) || oldQuantity < 0 || oldUnitCost < 0 || receivedQuantity <= 0 || receivedUnitCost < 0) throw new Error('Invalid stock cost inputs')
+  if (oldQuantity === 0 || oldUnitCost === 0) return roundMoney(receivedUnitCost)
+  return roundMoney((oldQuantity * oldUnitCost + receivedQuantity * receivedUnitCost) / (oldQuantity + receivedQuantity))
+}
+
+export const outstandingBalanceFor = (total: number, paid: number) => roundMoney(Math.max(0, total - Math.max(0, paid)))
+
+export const cashDifferenceFor = (expected: number, counted: number) => roundMoney(counted - expected)

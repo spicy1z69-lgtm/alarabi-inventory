@@ -10,10 +10,10 @@ import alarabiWatermarkDataUrl from './assets/alarabi-watermark.png?inline'
 import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck, Upload, RotateCcw,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
-import { invoiceGrandTotalFor, invoiceTaxFor, itemsSubtotalFor, lineTotalFor, roundMoney } from './lib/money'
+import { cashDifferenceFor, invoiceGrandTotalFor, invoiceTaxFor, itemsSubtotalFor, lineTotalFor, outstandingBalanceFor, roundMoney, weightedAverageCostFor } from './lib/money'
 
 const COMPANY = 'مؤسسة العربي لأنظمة التأريض'
 const INVOICE_COMPANY = COMPANY
@@ -111,8 +111,10 @@ const load = <T,>(key: string, fallback: T): T => {
 
 type SupplierDebtPayment = { id: string; amount: number; date: string; note: string }
 type SupplierDebt = { id: string; supplier: string; phone: string; reference: string; description: string; amount: number; date: string; dueDate: string; payments: SupplierDebtPayment[] }
-type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string; supplierDebtPaymentId?: string }
+type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string; supplierDebtPaymentId?: string; purchaseId?: string }
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
+type Operations = { purchases: Array<{id:string;date:string;supplier:string;productId:string;productName:string;quantity:number;unitCost:number;paid:number;total:number}>; returns: Array<{id:string;date:string;invoiceId:string;invoiceNumber:string;customer:string;amount:number}>; cashCounts: Array<{id:string;date:string;expected:number;actual:number;difference:number}> }
+const emptyOperations = (): Operations => ({ purchases: [], returns: [], cashCounts: [] })
 type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'debts' | 'reports'
 
 type AppUser = Pick<User, 'id'>
@@ -198,6 +200,13 @@ function InventoryApp({ user }: { user: AppUser }) {
   const supplierPaymentLock = useRef(false)
   useEffect(() => { if (!payingDebtId) supplierPaymentLock.current = false }, [payingDebtId])
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => [])
+  const [operations, setOperations] = useState<Operations>(() => emptyOperations())
+  const [purchaseSupplier, setPurchaseSupplier] = useState('')
+  const [purchaseProductId, setPurchaseProductId] = useState('')
+  const [purchaseQuantity, setPurchaseQuantity] = useState('')
+  const [purchaseCost, setPurchaseCost] = useState('')
+  const [purchasePaid, setPurchasePaid] = useState('')
+  const [cashCountActual, setCashCountActual] = useState('')
   const desktopStateRef = useRef<Array<{ key: string; value: unknown }>>([])
   desktopStateRef.current = [
     { key: 'products', value: products },
@@ -206,6 +215,7 @@ function InventoryApp({ user }: { user: AppUser }) {
     { key: 'cash', value: cashEntries },
     { key: 'supplier-debts', value: supplierDebts },
     { key: 'stock-movements', value: stockMovements },
+    { key: 'operations', value: operations },
   ]
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
@@ -267,6 +277,7 @@ function InventoryApp({ user }: { user: AppUser }) {
           setCashEntries((localValues.get('cash') as CashEntry[] | undefined) ?? [])
           setSupplierDebts((localValues.get('supplier-debts') as SupplierDebt[] | undefined) ?? [])
           setStockMovements((localValues.get('stock-movements') as StockMovement[] | undefined) ?? [])
+          setOperations((localValues.get('operations') as Operations | undefined) ?? emptyOperations())
           setCloudLoaded(true)
         } catch {
           if (active) setCloudError('تعذر تحميل البيانات المحلية. لم يتم استبدال البيانات أو إنشاء بيانات افتراضية.')
@@ -288,6 +299,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         { key: 'cash', localKey: 'alarabi-cash', fallback: isOwnerAccount ? load('alarabi-cash', []) : [] as CashEntry[], setter: setCashEntries },
         { key: 'supplier-debts', localKey: 'alarabi-supplier-debts', fallback: isOwnerAccount ? load('alarabi-supplier-debts', []) : [] as SupplierDebt[], setter: setSupplierDebts },
         { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: isOwnerAccount ? load('alarabi-stock-movements', []) : [] as StockMovement[], setter: setStockMovements },
+        { key: 'operations', localKey: 'alarabi-operations', fallback: isOwnerAccount ? load('alarabi-operations', emptyOperations()) : emptyOperations(), setter: setOperations },
       ] as const
       for (const record of records) {
         const cloudValue = values.get(record.key)
@@ -375,14 +387,15 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   const cashIn = cashEntries.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0)
   const cashOut = cashEntries.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0)
-  const cashBalance = cashIn - cashOut
+  const cashBalance = roundMoney(cashIn - cashOut)
+  const expenseTotal = roundMoney(cashEntries.filter(entry => entry.kind === 'out' && !entry.supplierDebtPaymentId && entry.category !== 'شراء بضاعة' && entry.category !== 'رد قيمة مرتجع').reduce((sum, entry) => sum + entry.amount, 0))
 
   const exportBackup = () => {
     const backup = {
       company: COMPANY,
       exportedAt: new Date().toISOString(),
       version: 1,
-      data: { products, quotes, invoices, cashEntries, stockMovements, supplierDebts },
+      data: { products, quotes, invoices, cashEntries, stockMovements, supplierDebts, operations },
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -433,6 +446,11 @@ function InventoryApp({ user }: { user: AppUser }) {
         cashEntries: dailyCash,
         stockMovements: dailyStockMovements,
         supplierDebts: dailySupplierDebts,
+        operations: {
+          purchases: operations.purchases.filter(item => item.date === date),
+          returns: operations.returns.filter(item => item.date === date),
+          cashCounts: operations.cashCounts.filter(item => item.date === date),
+        },
         stockSnapshot: products,
       },
     }
@@ -460,7 +478,8 @@ function InventoryApp({ user }: { user: AppUser }) {
         !Array.isArray(data.invoices) ||
         !Array.isArray(data.cashEntries) ||
         (data.stockMovements !== undefined && !Array.isArray(data.stockMovements)) ||
-        (data.supplierDebts !== undefined && !Array.isArray(data.supplierDebts))
+        (data.supplierDebts !== undefined && !Array.isArray(data.supplierDebts)) ||
+        (data.operations !== undefined && (!data.operations || !Array.isArray(data.operations.purchases) || !Array.isArray(data.operations.returns) || !Array.isArray(data.operations.cashCounts)))
       ) {
         setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
         return
@@ -473,6 +492,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       setCashEntries(data.cashEntries)
       setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : [])
       setSupplierDebts(Array.isArray(data.supplierDebts) ? data.supplierDebts : [])
+      setOperations(data.operations ?? emptyOperations())
       setNotice('تم تحميل النسخة الاحتياطية. جاري حفظ البيانات')
     } catch {
       setNotice('تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح بصيغة JSON')
@@ -501,6 +521,12 @@ function InventoryApp({ user }: { user: AppUser }) {
   }, [stockMovements, cloudLoaded, user.id])
 
   useEffect(() => {
+    if (!cloudLoaded || isDesktopApp()) return
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-operations', JSON.stringify(operations))
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'operations', state_value: operations, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل العمليات: ' + error.message) })
+  }, [operations, cloudLoaded, user.id])
+
+  useEffect(() => {
     if (!cloudLoaded || !isDesktopApp()) return
     const revision = ++localSaveRevision.current
     setLocalSaveStatus('saving')
@@ -512,7 +538,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         setCloudError('تعذر حفظ مجموعة بيانات المحل كاملة محليًا: ' + (error instanceof Error ? error.message : 'خطأ غير متوقع'))
       }
     })
-  }, [products, quotes, invoices, cashEntries, supplierDebts, stockMovements, cloudLoaded])
+  }, [products, quotes, invoices, cashEntries, supplierDebts, stockMovements, operations, cloudLoaded])
 
   useEffect(() => {
     if (!cloudLoaded || !isDesktopApp()) return
@@ -530,32 +556,36 @@ function InventoryApp({ user }: { user: AppUser }) {
   )
 
   const lowStock = products.filter(p => p.quantity <= p.minStock)
-  const reportInvoices = invoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
+  const activeInvoices = invoices.filter(invoice => !(invoice as Invoice & { returned?: boolean }).returned)
+  const reportInvoices = activeInvoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
   const reportCash = cashEntries.filter(e => (!reportFrom || e.date >= reportFrom) && (!reportTo || e.date <= reportTo))
   const reportSales = reportInvoices.reduce((sum, i) => sum + invoiceTotalFor(i), 0)
   const reportCollected = reportInvoices.reduce((sum, i) => sum + Math.min(invoiceTotalFor(i), Math.max(0, i.paidAmount || 0)), 0)
-  const reportBalance = reportInvoices.reduce((sum, i) => sum + Math.max(0, invoiceTotalFor(i) - (i.paidAmount || 0)), 0)
+  const reportBalance = reportInvoices.reduce((sum, i) => sum + outstandingBalanceFor(invoiceTotalFor(i), i.paidAmount || 0), 0)
   const reportCashIn = reportCash.filter(e => e.kind === 'in').reduce((sum, e) => sum + e.amount, 0)
   const reportCashOut = reportCash.filter(e => e.kind === 'out').reduce((sum, e) => sum + e.amount, 0)
-  const totalInvoiceSales = invoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
-  const totalCollected = invoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
-  const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
-  const unpaidInvoices = invoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
-  const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
+  const totalInvoiceSales = activeInvoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
+  const totalCollected = activeInvoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
+  const customerBalances = activeInvoices.reduce((sum, invoice) => sum + outstandingBalanceFor(invoiceTotalFor(invoice), invoice.paidAmount || 0), 0)
+  const unpaidInvoices = activeInvoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
+  const paidInvoiceCount = activeInvoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
   // Only use cost snapshots stored on invoice lines. Falling back to today's
   // product cost would rewrite historical margins whenever a product is edited.
-  const costCompleteInvoices = invoices.filter(invoice =>
+  const costCompleteInvoices = activeInvoices.filter(invoice =>
     (invoice.items || []).every(item => typeof item.costPrice === 'number' && item.costPrice > 0)
   )
   const knownCostSales = costCompleteInvoices.reduce((sum, invoice) =>
     sum + invoice.items.reduce((itemSum, item) => itemSum + item.quantity * (item.costPrice ?? 0), 0), 0)
-  const hasMissingCosts = costCompleteInvoices.length !== invoices.length
+  const hasMissingCosts = costCompleteInvoices.length !== activeInvoices.length
   const knownSalesBeforeTax = costCompleteInvoices.reduce((sum, invoice) => {
     const subtotal = itemsSubtotalFor(invoice.items)
     const discount = Math.min(subtotal, Math.max(0, invoice.discount || 0))
     return sum + Math.max(0, subtotal - discount)
   }, 0)
   const estimatedGrossProfit = knownSalesBeforeTax - knownCostSales
+  const knownNetProfit = roundMoney(estimatedGrossProfit - expenseTotal)
+  const activeOverdueQuotes = quotes.filter(quote => quote.date < today() && !invoices.some(invoice => invoice.quoteId === quote.id || invoice.id === quote.convertedInvoiceId))
+  const dueCustomerInvoices = activeInvoices.filter(invoice => invoice.dueDate && invoice.dueDate < today() && invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
 
   const quickSearchResults = useMemo(() => {
     const term = quickSearchQuery.trim().toLocaleLowerCase()
@@ -918,6 +948,41 @@ function InventoryApp({ user }: { user: AppUser }) {
     setNotice('تم حفظ الفاتورة وخصم الكميات من المخزون بنجاح')
   }
 
+  const returnInvoice = (invoice: Invoice) => {
+    if ((invoice as Invoice & { returned?: boolean }).returned) { setNotice('تم تسجيل مرتجع لهذه الفاتورة بالفعل'); return }
+    if (!window.confirm(`تأكيد إرجاع كامل الفاتورة ${invoice.number}؟ سيتم إعادة الكميات للمخزون وعكس المبلغ المحصل في الخزنة.`)) return
+    const total = invoiceTotalFor(invoice), paid = roundMoney(Math.max(0, Math.min(total, invoice.paidAmount || 0)))
+    setProducts(old => old.map(product => ({ ...product, quantity: product.quantity + invoice.items.filter(row => row.productId === product.id).reduce((sum, row) => sum + row.quantity, 0) })))
+    setStockMovements(old => [...invoice.items.map(row => ({ id: crypto.randomUUID(), productId: row.productId, productName: row.name, kind: 'in' as const, quantity: row.quantity, reason: 'مرتجع فاتورة', reference: invoice.number, date: today() })), ...old])
+    if (paid > 0) setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount: paid, category: 'رد قيمة مرتجع', note: `مرتجع الفاتورة ${invoice.number} — ${invoice.customer}`, date: today(), invoiceId: invoice.id }, ...old])
+    setInvoices(old => old.map(item => item.id === invoice.id ? { ...item, paidAmount: 0, status: 'unpaid', returned: true } as Invoice : item))
+    setOperations(old => ({ ...old, returns: [{ id: crypto.randomUUID(), date: today(), invoiceId: invoice.id, invoiceNumber: invoice.number, customer: invoice.customer, amount: total }, ...old.returns] }))
+    setNotice('تم تسجيل المرتجع وإعادة المخزون وعكس المقبوضات المرتبطة به')
+  }
+
+  const savePurchase = () => {
+    const product = products.find(item => item.id === purchaseProductId)
+    const quantity = Number(purchaseQuantity), unitCost = roundMoney(Number(purchaseCost)), paid = roundMoney(Number(purchasePaid || 0)), total = roundMoney(quantity * unitCost)
+    if (!product || !purchaseSupplier.trim() || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost <= 0 || !Number.isFinite(paid) || paid < 0 || paid > total) { setNotice('راجع المورد والصنف والكمية والتكلفة والمبلغ المدفوع'); return }
+    const before = product.quantity, after = before + quantity, averageCost = weightedAverageCostFor(before, product.costPrice || 0, quantity, unitCost)
+    setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: after, costPrice: averageCost } : item))
+    setStockMovements(old => [{ id: crypto.randomUUID(), productId: product.id, productName: product.name, kind: 'in', quantity, reason: 'استلام مشتريات', reference: purchaseSupplier.trim(), date: today(), quantityBefore: before, quantityAfter: after }, ...old])
+    const purchaseId = crypto.randomUUID()
+    setOperations(old => ({ ...old, purchases: [{ id: purchaseId, date: today(), supplier: purchaseSupplier.trim(), productId: product.id, productName: product.name, quantity, unitCost, paid, total }, ...old.purchases] }))
+    if (paid > 0) setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount: paid, category: 'شراء بضاعة', note: `${product.name} — ${purchaseSupplier.trim()}`, date: today(), purchaseId }, ...old])
+    const owing = roundMoney(total - paid)
+    if (owing > 0) setSupplierDebts(old => [{ id: crypto.randomUUID(), supplier: purchaseSupplier.trim(), phone: '', reference: 'شراء ' + product.code, description: `${quantity} × ${product.name} بسعر تكلفة ${money(unitCost)}`, amount: owing, date: today(), dueDate: today(), payments: [] }, ...old])
+    setPurchaseQuantity(''); setPurchaseCost(''); setPurchasePaid(''); setNotice('تم تسجيل الشراء وتحديث المخزون ومتوسط التكلفة والخزنة/الدين')
+  }
+
+  const saveCashCount = () => {
+    const actual = roundMoney(Number(cashCountActual))
+    if (!cashCountActual.trim() || !Number.isFinite(actual) || actual < 0) { setNotice('اكتب قيمة النقد الفعلية رقمًا صحيحًا'); return }
+    const expected = cashBalance, difference = cashDifferenceFor(expected, actual)
+    setOperations(old => ({ ...old, cashCounts: [{ id: crypto.randomUUID(), date: today(), expected, actual, difference }, ...old.cashCounts] }))
+    setNotice(`تم حفظ جرد الخزنة. الفرق ${money(difference)}؛ راجعه وسجل أي حركة تصحيحية منفصلة.`); setCashCountActual('')
+  }
+
   const deleteInvoice = (invoice: Invoice) => {
     const linkedPayments = cashEntries.filter(entry => entry.invoiceId === invoice.id)
     if (linkedPayments.length > 0) {
@@ -1094,6 +1159,34 @@ function InventoryApp({ user }: { user: AppUser }) {
     resetInvoiceDraft()
   }
 
+  const importProductsExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return
+    try {
+      const { default: ExcelJS } = await import('exceljs'); const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(await file.arrayBuffer())
+      const sheet = workbook.worksheets[0]; if (!sheet || sheet.rowCount < 2) throw new Error('الملف فارغ أو لا يحتوي أصنافًا')
+      const labels = new Map<string, number>(); sheet.getRow(1).eachCell((cell, column) => labels.set(String(cell.text || '').trim().toLowerCase(), column))
+      const col = (...names: string[]) => names.map(name => labels.get(name)).find(value => value !== undefined)
+      const codeCol = col('كود الصنف','الكود','code'), nameCol = col('اسم الصنف','الصنف','name')
+      if (!codeCol || !nameCol) throw new Error('يجب إضافة عمودي «كود الصنف» و«اسم الصنف» في الصف الأول')
+      const priceCol=col('سعر البيع','السعر','price'), costCol=col('تكلفة الوحدة','سعر التكلفة','التكلفة','cost'), qtyCol=col('الكمية','quantity'), minCol=col('حد التنبيه','الحد الأدنى','minstock'), catCol=col('الفئة','category')
+      const imported: Product[]=[]
+      sheet.eachRow((row, index) => { if(index===1)return; const code=String(row.getCell(codeCol).text||'').trim(), name=String(row.getCell(nameCol).text||'').trim(); if(!code&&!name)return; const num=(c:number|undefined,d:number)=>c?Number(row.getCell(c).value||d):d; const quantity=num(qtyCol,0),price=num(priceCol,0),costPrice=num(costCol,0),minStock=num(minCol,0); if(!code||!name||![quantity,price,costPrice,minStock].every(Number.isFinite)||quantity<0||price<0||costPrice<0||minStock<0)throw new Error(`بيانات غير صحيحة في الصف ${index}`); imported.push({id:crypto.randomUUID(),code,name,category:catCol?String(row.getCell(catCol).text||'عام'):'عام',quantity,price:roundMoney(price),costPrice:roundMoney(costPrice),minStock}) })
+      const existing=new Set(products.map(p=>p.code.trim().toLowerCase())); const duplicates=imported.filter(p=>existing.has(p.code.trim().toLowerCase()))
+      const seen=new Set<string>(); const duplicateCodes=imported.filter(p=>{const key=p.code.trim().toLowerCase();if(seen.has(key))return true;seen.add(key);return false}).map(p=>p.code)
+      if(duplicates.length||duplicateCodes.length)throw new Error('أكواد مكررة أو موجودة بالفعل: '+[...new Set([...duplicates.map(p=>p.code),...duplicateCodes])].slice(0,5).join('، '))
+      if(!imported.length)throw new Error('لم يتم العثور على أصناف صالحة')
+      setProducts(old=>[...imported,...old]); setNotice(`تم استيراد ${imported.length} صنف من Excel`)
+    } catch(error) { setNotice('تعذر استيراد الأصناف: '+(error instanceof Error?error.message:'خطأ في الملف')) } finally { event.target.value='' }
+  }
+
+  const printCustomerStatement = (customerName: string) => {
+    const docs=invoices.filter(invoice=>invoice.customer.trim().toLowerCase()===customerName.trim().toLowerCase())
+    const esc=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    const rows=docs.map(invoice=>{const returned=!!(invoice as Invoice & {returned?:boolean}).returned; return `<tr><td>${esc(invoice.date)}</td><td>${esc(invoice.number)}</td><td>${returned?'مرتجعة':money(invoiceTotalFor(invoice))}</td><td>${returned?'مرتجعة':money(invoice.paidAmount||0)}</td><td>${returned?money(0):money(Math.max(0,invoiceTotalFor(invoice)-(invoice.paidAmount||0)))}</td></tr>`}).join('')
+    const html=`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>كشف حساب عميل</title><style>body{font:14px Tahoma;padding:24px;color:#243746}table{border-collapse:collapse;width:100%;margin-top:20px}td,th{border:1px solid #ccd5dc;padding:10px;text-align:right}th{background:#173653;color:white}</style><h1>كشف حساب عميل — ${esc(customerName)}</h1><table><thead><tr><th>التاريخ</th><th>رقم الفاتورة</th><th>الإجمالي</th><th>المحصل</th><th>المتبقي</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print()</script></html>`
+    const win=window.open('','_blank'); if(!win){setNotice('اسمح بفتح نافذة كشف الحساب');return} win.document.write(html);win.document.close()
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1155,7 +1248,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.2</small>
+          <small>v1.1.3</small>
         </div>
       </aside>
 
@@ -1281,7 +1374,18 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<AlertTriangle />} label="مستحقات العملاء" value={money(customerBalances)} foot={unpaidInvoices.length + ' فاتورة عليها رصيد'} warning={customerBalances > 0} />
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
               <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? `بيانات مكتملة لـ ${costCompleteInvoices.length} من ${invoices.length} فاتورة` : 'حسب تكلفة الشراء المحفوظة بالفواتير'} warning={hasMissingCosts} />
-              <Stat icon={<CircleDollarSign />} label="هامش إجمالي تقديري" value={money(estimatedGrossProfit)} foot={hasMissingCosts ? 'تقدير للفواتير المكتملة فقط، قبل المصروفات والضرائب' : 'المبيعات بعد الخصم وقبل الضريبة ناقص التكلفة'} warning={hasMissingCosts} />
+              <Stat icon={<CircleDollarSign />} label="صافي تقديري بعد المصروفات" value={money(knownNetProfit)} foot={hasMissingCosts ? 'يشمل الفواتير المكتملة التكلفة فقط؛ قبل الضريبة' : 'هامش البيع ناقص المصروفات المسجلة'} warning={hasMissingCosts} />
+            </section>
+
+            <section className="panel">
+              <div className="panel-head"><div><h3>مركز التنبيهات</h3><p>الحاجات اللي محتاجة مراجعتك دلوقتي</p></div></div>
+              <div className="alert-list">
+                {lowStock.length > 0 && <button className="alert-row" onClick={() => setTab('products')}><AlertTriangle size={17}/> {lowStock.length} صنف وصل لحد التنبيه أو أقل</button>}
+                {dueCustomerInvoices.length > 0 && <button className="alert-row" onClick={() => setTab('invoices')}><AlertTriangle size={17}/> {dueCustomerInvoices.length} فاتورة عميل متأخرة عن الاستحقاق</button>}
+                {overdueSupplierDebts.length > 0 && <button className="alert-row" onClick={() => setTab('debts')}><AlertTriangle size={17}/> {overdueSupplierDebts.length} دين مورد متأخر</button>}
+                {activeOverdueQuotes.length > 0 && <button className="alert-row" onClick={() => setTab('quotes')}><CalendarCheck size={17}/> {activeOverdueQuotes.length} عرض سعر قديم لم يتحول لفاتورة</button>}
+                {!lowStock.length && !dueCustomerInvoices.length && !overdueSupplierDebts.length && !activeOverdueQuotes.length && <p className="muted">لا توجد تنبيهات معلقة حاليًا.</p>}
+              </div>
             </section>
 
             <section className="panel">
@@ -1485,8 +1589,10 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<ClipboardList />} label="عدد الحركات" value={String(cashEntries.length)} foot="حركة مالية مسجلة" />
             </section>
             <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
+            <div className="cash-reconcile"><strong>جرد نقدية الصندوق</strong><span>الرصيد الدفتري: {money(cashBalance)}</span><label className="field"><span>النقد الفعلي</span><input type="number" min="0" step="0.01" value={cashCountActual} onChange={e=>setCashCountActual(e.target.value)} placeholder="المبلغ الموجود بالصندوق"/></label><button className="secondary-btn" onClick={saveCashCount}>حفظ نتيجة الجرد</button></div>
+            {operations.cashCounts.length>0&&<p className="muted">آخر جرد {operations.cashCounts[0].date}: الفعلي {money(operations.cashCounts[0].actual)} · الفرق {money(operations.cashCounts[0].difference)}</p>}
             <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث بالبند أو الملاحظات أو التاريخ أو المبلغ..." /></label><span className="muted">{filteredCashEntries.length} حركة</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
-            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : entry.supplierDebtPaymentId ? <span className="muted">مرتبطة بسداد دين</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
+            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : entry.supplierDebtPaymentId ? <span className="muted">مرتبطة بسداد دين</span> : entry.purchaseId ? <span className="muted">مرتبطة بعملية شراء</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1500,6 +1606,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               </div>
 
               <div className="products-actions">
+                <label className="secondary-button" style={{display:'inline-flex',alignItems:'center',gap:7,cursor:'pointer'}}><Upload size={16}/> استيراد Excel<input type="file" accept=".xlsx" hidden onChange={importProductsExcel}/></label>
                 <button className="secondary-button" onClick={recordStockMovement}>
                   <Boxes size={17} /> تسجيل حركة مخزون
                 </button>
@@ -1644,6 +1751,11 @@ function InventoryApp({ user }: { user: AppUser }) {
 
         {tab === 'debts' && (
           <>
+            <section className="panel"><div className="panel-head"><div><h3>استلام مشتريات</h3><p>يسجل البضاعة الواردة، ويحدّث متوسط تكلفة الصنف والخزنة أو دين المورد.</p></div></div>
+              <div className="form-grid"><label className="field"><span>المورد *</span><input value={purchaseSupplier} onChange={e=>setPurchaseSupplier(e.target.value)} placeholder="اسم المورد"/></label><label className="field"><span>الصنف *</span><select value={purchaseProductId} onChange={e=>setPurchaseProductId(e.target.value)}><option value="">اختر الصنف</option>{products.map(p=><option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select></label><label className="field"><span>الكمية *</span><input type="number" min="1" step="1" value={purchaseQuantity} onChange={e=>setPurchaseQuantity(e.target.value)}/></label><label className="field"><span>تكلفة الوحدة *</span><input type="number" min="0.01" step="0.01" value={purchaseCost} onChange={e=>setPurchaseCost(e.target.value)}/></label><label className="field"><span>المدفوع الآن</span><input type="number" min="0" step="0.01" value={purchasePaid} onChange={e=>setPurchasePaid(e.target.value)}/></label></div>
+              {Number(purchaseQuantity)>0&&Number(purchaseCost)>0&&<p className="muted">إجمالي الشراء: {money(Number(purchaseQuantity)*Number(purchaseCost))} · الدين المتبقي: {money(Math.max(0,Number(purchaseQuantity)*Number(purchaseCost)-Number(purchasePaid||0)))}</p>}
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}><button className="primary-btn" onClick={savePurchase} disabled={!products.length}><Plus size={16}/> تسجيل واستلام البضاعة</button></div>
+            </section>
             <section className="stats-grid">
               <Stat icon={<CircleDollarSign />} label="إجمالي الديون" value={money(supplierDebts.reduce((sum, debt) => sum + debt.amount, 0))} foot="إجمالي المبالغ المسجلة للموردين" />
               <Stat icon={<Wallet />} label="إجمالي المسدد" value={money(supplierDebts.reduce((sum, debt) => sum + debtPaid(debt), 0))} foot="مدفوعات مسجلة ومربوطة بالخزنة" />
@@ -1751,10 +1863,12 @@ function InventoryApp({ user }: { user: AppUser }) {
                   return <tr key={inv.id}>
                     <td><code>{inv.number}</code></td><td className="product-cell">{inv.customer}</td><td>{inv.date}</td>
                     <td>{money(total)}</td><td>{money(inv.paidAmount)}</td><td>{money(balance)}</td>
-                    <td><span className={inv.status === 'paid' ? 'pill success' : 'pill danger'}>{inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
+                    <td><span className={(inv as Invoice & {returned?:boolean}).returned ? 'pill warning' : inv.status === 'paid' ? 'pill success' : 'pill danger'}>{(inv as Invoice & {returned?:boolean}).returned ? 'مرتجعة' : inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
                     <td className="actions">
                       <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
-                      {inv.status !== 'paid' && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
+                      <button className="secondary-btn invoice-status-btn" onClick={() => printCustomerStatement(inv.customer)}>كشف العميل</button>
+                      {inv.status !== 'paid' && !(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
+                      {!(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => returnInvoice(inv)} title="تسجيل مرتجع كامل وإعادة الكميات للمخزون"><RotateCcw size={14}/> مرتجع</button>}
                       <button className="icon-btn delete" aria-label="حذف الفاتورة" title="حذف الفاتورة" onClick={() => deleteInvoice(inv)}><Trash2 size={16} /></button>
                     </td>
                   </tr>
