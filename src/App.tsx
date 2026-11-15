@@ -1155,7 +1155,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.0</small>
+          <small>v1.1.1</small>
         </div>
       </aside>
 
@@ -2337,5 +2337,6 @@ function BrandedLoadingScreen({ caption }: { caption: string }) {
     <div className="loading-track"><span /></div>
   </main>
 }
+
 
 

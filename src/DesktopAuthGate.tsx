@@ -209,7 +209,9 @@ function LocalDesktopAuthGate({ children }: { children: ReactNode }) {
         result = signup
         generatedRecoveryKey = signup.recoveryKey
       } else {
-        result = await window.alarabiDesktop!.localLogin(username, password)
+        const login = await window.alarabiDesktop!.localLogin(username, password)
+        result = login
+        generatedRecoveryKey = login.recoveryKey
       }
       setHasUser(true)
       setUnlocked(Boolean(result.ok))
@@ -245,7 +247,7 @@ function LocalDesktopAuthGate({ children }: { children: ReactNode }) {
       {error && <p role="alert" style={styles.error}>{error}</p>}
       <button disabled={busy} style={{...styles.submit, opacity:busy ? .72 : 1, cursor:busy ? 'wait' : 'pointer'}}>{busy ? 'لحظة واحدة…' : setup ? 'إنشاء الحساب وفتح البرنامج' : mode === 'reset' ? 'تعيين كلمة المرور' : 'تسجيل الدخول'} <span aria-hidden="true">←</span></button>
       {!setup && <button type="button" style={styles.link} onClick={()=>{setMode(mode === 'login' ? 'reset' : 'login');setError('');setPassword('');setConfirm('');setRecoveryCode('')}}>{mode === 'login' ? 'نسيت كلمة المرور؟' : 'العودة لتسجيل الدخول'}</button>}
-      <div style={styles.footerRule} /><p style={styles.foot}>{mode === 'reset' ? 'إذا كان حسابك قديمًا ولا تملك رمز استعادة، تواصل مع مؤسسة العربي: 01094990377 أو 01064227445.' : 'كلمة المرور تُخزّن كبصمة مشتقة مع salt، وليست كنص مكشوف. احفظها ورمز الاستعادة في مكان آمن.'}</p>
+      <div style={styles.footerRule} /><p style={styles.foot}>{mode === 'reset' ? 'الحساب القديم الذي لم يُنشأ له رمز استعادة لا يمكن استرجاعه ذاتيًا بعد نسيان كلمة المرور. إذا كنت تعرف كلمة المرور، سجّل الدخول لتوليد رمز استعادة.' : 'كلمة المرور تُخزّن كبصمة مشتقة مع salt، وليست كنص مكشوف. احفظها ورمز الاستعادة في مكان آمن.'}</p>
     </form>}
   </section></main>
 }

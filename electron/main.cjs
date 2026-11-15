@@ -162,7 +162,7 @@ function registerLocalAuthHandlers() {
     const row = db.prepare('SELECT id, username, recovery_salt, recovery_hash FROM local_users WHERE username_normalized = ?')
       .get(username.trim().toLocaleLowerCase())
     if (!row?.recovery_salt || !row?.recovery_hash) {
-      throw new Error('لا يوجد رمز استعادة لهذا الحساب القديم. تواصل مع دعم مؤسسة العربي على 01094990377 أو 01064227445.')
+      throw new Error('هذا الحساب أُنشئ قبل إضافة رمز الاستعادة. إذا كنت ما زلت تعرف كلمة المرور، سجّل الدخول مرة واحدة وسيظهر لك رمز جديد. إذا نسيت كلمة المرور ولم تحفظ رمزًا، لا توجد وسيلة استعادة ذاتية لهذا الحساب.')
     }
     let matches = false
     try {
@@ -188,7 +188,7 @@ function registerLocalAuthHandlers() {
     if (typeof username !== 'string' || typeof password !== 'string' || username.length > 40 || password.length > 256) {
       throw new Error('اسم المستخدم أو كلمة المرور غير صحيحين.')
     }
-    const row = db.prepare('SELECT id, username, password_salt, password_hash FROM local_users WHERE username_normalized = ?')
+    const row = db.prepare('SELECT id, username, password_salt, password_hash, recovery_salt, recovery_hash FROM local_users WHERE username_normalized = ?')
       .get(username.trim().toLocaleLowerCase())
     const salt = row?.password_salt || Buffer.alloc(16)
     const expected = row?.password_hash || Buffer.alloc(64)
@@ -197,9 +197,17 @@ function registerLocalAuthHandlers() {
       authenticatedContents.delete(event.sender.id)
       throw new Error('اسم المستخدم أو كلمة المرور غير صحيحين.')
     }
+    let recoveryKey
+    if (!row.recovery_salt || !row.recovery_hash) {
+      recoveryKey = createRecoveryKey()
+      const recoverySalt = crypto.randomBytes(16)
+      const recoveryHash = crypto.scryptSync(normalizeRecoveryKey(recoveryKey), recoverySalt, 64)
+      db.prepare('UPDATE local_users SET recovery_salt = ?, recovery_hash = ? WHERE id = ?')
+        .run(recoverySalt, recoveryHash, row.id)
+    }
     const identity = { kind: 'local', ownerId: 'local:' + row.id, username: row.username }
     authenticatedContents.set(event.sender.id, identity)
-    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username } }
+    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username }, ...(recoveryKey ? { recoveryKey } : {}) }
   })
 
   ipcMain.handle('auth:local-session', (event) => {

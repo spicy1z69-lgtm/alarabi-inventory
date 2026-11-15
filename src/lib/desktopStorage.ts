@@ -8,7 +8,7 @@ declare global {
       lockSession: () => Promise<{ ok: boolean }>
       localAuthStatus: () => Promise<{ hasUser: boolean; session: { ownerId: string; username: string } | null }>
       localSignUp: (username: string, password: string) => Promise<{ ok: boolean; session: { ownerId: string; username: string }; recoveryKey: string }>
-      localLogin: (username: string, password: string) => Promise<{ ok: boolean; session: { ownerId: string; username: string } }>
+      localLogin: (username: string, password: string) => Promise<{ ok: boolean; session: { ownerId: string; username: string }; recoveryKey?: string }>
       localResetPassword: (username: string, recoveryKey: string, newPassword: string) => Promise<{ ok: boolean; recoveryKey: string }>
       localSession: () => Promise<{ ownerId: string; username: string } | null>
       localLogout: () => Promise<{ ok: boolean }>
