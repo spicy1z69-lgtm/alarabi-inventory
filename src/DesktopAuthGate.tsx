@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { ShieldCheck } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { isDesktopApp } from './lib/desktopStorage'
 
@@ -127,15 +128,14 @@ function CloudAuthGate({ children }: { children: ReactNode }) {
   return <main style={styles.page} dir="rtl"><section style={styles.card}>
     <div style={styles.accent} />
     <header style={styles.brandHeader}>
-      <div style={styles.logo}>ع</div>
       <div style={styles.brandCopy}>
-        <div style={styles.eyebrow}>AL ARABI INVENTORY</div>
-        <h1 style={styles.heading}>العربي</h1>
+        <div style={styles.eyebrow}>alarabisystem</div>
+        <h1 style={styles.heading}>مؤسسة العربي</h1>
         <p style={styles.brandSubtitle}>لأنظمة التأريض والحماية من الصواعق</p>
       </div>
     </header>
     <div style={styles.sectionHead}>
-      <div style={styles.secureMark}>✓</div>
+      <div style={styles.secureMark}><ShieldCheck size={19} aria-hidden="true" /></div>
       <div><h2 style={styles.subheading}>{title}</h2><p style={styles.description}>{ready ? description : 'جاري الاتصال بخدمة الحسابات الآمنة…'}</p></div>
     </div>
     {!ready ? <p role="status" style={styles.notice}>لحظة واحدة…</p> : <form onSubmit={submit}>
@@ -157,12 +157,16 @@ function CloudAuthGate({ children }: { children: ReactNode }) {
 
 
 function LocalDesktopAuthGate({ children }: { children: ReactNode }) {
+  const [mode, setMode] = useState<'login' | 'reset'>('login')
   const [ready, setReady] = useState(false)
   const [hasUser, setHasUser] = useState(false)
   const [unlocked, setUnlocked] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [recoveryCode, setRecoveryCode] = useState('')
+  const [newRecoveryKey, setNewRecoveryKey] = useState('')
+  const [unlockAfterKeySave, setUnlockAfterKeySave] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -184,35 +188,64 @@ function LocalDesktopAuthGate({ children }: { children: ReactNode }) {
     event.preventDefault()
     setError('')
     if (busy) return
-    if (password.length < 10) { setError('كلمة المرور لازم تكون 10 أحرف على الأقل.'); return }
-    if (setup && password !== confirm) { setError('كلمتا المرور غير متطابقتين.'); return }
+    if (setup && (password.length < 10 || password !== confirm)) { setError(password.length < 10 ? 'كلمة المرور لازم تكون 10 أحرف على الأقل.' : 'كلمتا المرور غير متطابقتين.'); return }
+    if (mode === 'reset' && (!username.trim() || !recoveryCode.trim() || password.length < 10 || password !== confirm)) {
+      setError('اكتب اسم المستخدم ورمز الاستعادة، وكلمة مرور جديدة من 10 أحرف على الأقل مع تأكيدها.')
+      return
+    }
     setBusy(true)
     try {
-      const result = setup
-        ? await window.alarabiDesktop!.localSignUp(username, password)
-        : await window.alarabiDesktop!.localLogin(username, password)
+      if (mode === 'reset' && !setup) {
+        const result = await window.alarabiDesktop!.localResetPassword(username, recoveryCode, password)
+        setNewRecoveryKey(result.recoveryKey)
+        setUnlockAfterKeySave(false)
+        setPassword(''); setConfirm(''); setRecoveryCode('')
+        return
+      }
+      let result: { ok: boolean; session: { ownerId: string; username: string } }
+      let generatedRecoveryKey: string | undefined
+      if (setup) {
+        const signup = await window.alarabiDesktop!.localSignUp(username, password)
+        result = signup
+        generatedRecoveryKey = signup.recoveryKey
+      } else {
+        result = await window.alarabiDesktop!.localLogin(username, password)
+      }
       setHasUser(true)
       setUnlocked(Boolean(result.ok))
       setUsername(result.session.username)
       setPassword('')
       setConfirm('')
+      if (generatedRecoveryKey) {
+        setNewRecoveryKey(generatedRecoveryKey)
+        setUnlockAfterKeySave(true)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'تعذر تسجيل الدخول. راجع البيانات وحاول مرة أخرى.')
     } finally { setBusy(false) }
   }
 
+  if (newRecoveryKey) return <main style={styles.page} dir="rtl"><section style={styles.card}>
+    <div style={styles.accent} /><header style={styles.brandHeader}><div style={styles.brandCopy}><div style={styles.eyebrow}>alarabisystem · استعادة الحساب</div><h1 style={styles.heading}>احفظ رمز الاستعادة</h1></div></header>
+    <p style={styles.description}>احتفظ بالرمز في مكان آمن خارج الكمبيوتر. يُستخدم لتعيين كلمة مرور جديدة إذا نسيتها. لا يمكن للدعم استرجاع الرمز بعد إغلاق هذه الشاشة.</p>
+    <div dir="ltr" style={{...styles.input, height:'auto', textAlign:'center', fontSize:19, fontWeight:900, letterSpacing:1.5, wordBreak:'break-word'}}>{newRecoveryKey}</div>
+    <p style={styles.notice}>رمز الاستعادة سري، ويمنح حامله القدرة على تغيير كلمة مرور هذا الحساب.</p>
+    <button type="button" style={styles.submit} onClick={()=>{setNewRecoveryKey('');setError('');if(unlockAfterKeySave)setUnlocked(true);else{setMode('login');setPassword('');setConfirm('')}}}>حفظت الرمز — متابعة</button>
+  </section></main>
   if (unlocked) return <>{children}</>
   return <main style={styles.page} dir="rtl"><section style={styles.card}>
     <div style={styles.accent} />
-    <header style={styles.brandHeader}><div style={styles.logo}>ع</div><div style={styles.brandCopy}><div style={styles.eyebrow}>AL ARABI INVENTORY · DESKTOP</div><h1 style={styles.heading}>العربي</h1><p style={styles.brandSubtitle}>حساب محلي للنسخة المكتبية — لا يحتاج بريدًا أو إنترنت</p></div></header>
-    <div style={styles.sectionHead}><div style={styles.secureMark}>✓</div><div><h2 style={styles.subheading}>{setup ? 'إنشاء الحساب المحلي الأول' : 'تسجيل الدخول'}</h2><p style={styles.description}>{ready ? (setup ? 'أنشئ اسم مستخدم وكلمة مرور لحماية بيانات هذا الكمبيوتر.' : 'أدخل بيانات الحساب المحلي لفتح المخزون والفواتير.') : 'جاري تجهيز قاعدة البيانات المحلية…'}</p></div></div>
+    <header style={styles.brandHeader}><div style={styles.brandCopy}><div style={styles.eyebrow}>alarabisystem · إصدار الكمبيوتر</div><h1 style={styles.heading}>مؤسسة العربي</h1><p style={styles.brandSubtitle}>حساب محلي للنسخة المكتبية — لا يحتاج بريدًا أو إنترنت</p></div></header>
+    <div style={styles.sectionHead}><div style={styles.secureMark}><ShieldCheck size={19} aria-hidden="true" /></div><div><h2 style={styles.subheading}>{setup ? 'إنشاء الحساب المحلي الأول' : mode === 'reset' ? 'استعادة الحساب' : 'تسجيل الدخول'}</h2><p style={styles.description}>{ready ? (setup ? 'أنشئ اسم مستخدم وكلمة مرور لحماية بيانات هذا الكمبيوتر.' : mode === 'reset' ? 'أدخل رمز الاستعادة الذي حفظته عند إنشاء الحساب لتعيين كلمة مرور جديدة.' : 'أدخل بيانات الحساب المحلي لفتح المخزون والفواتير.') : 'جاري تجهيز قاعدة البيانات المحلية…'}</p></div></div>
     {!ready ? <p role="status" style={styles.notice}>لحظة واحدة…</p> : <form onSubmit={submit}>
       <label style={styles.label}>اسم المستخدم</label><input style={styles.input} autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} required minLength={3} maxLength={40} placeholder="3 إلى 40 حرفًا" />
-      <label style={styles.label}>كلمة المرور</label><input style={styles.input} type="password" autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={10} maxLength={256} placeholder="10 أحرف على الأقل" />
-      {setup && <><label style={styles.label}>تأكيد كلمة المرور</label><input style={styles.input} type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)} required minLength={10} maxLength={256} /></>}
+      {mode === 'reset' && <><label style={styles.label}>رمز الاستعادة</label><input style={styles.input} dir="ltr" autoComplete="off" value={recoveryCode} onChange={e=>setRecoveryCode(e.target.value)} required maxLength={64} placeholder="XXXX-XXXX-XXXX-XXXX-..." /></>}
+      <label style={styles.label}>{mode === 'reset' ? 'كلمة المرور الجديدة' : 'كلمة المرور'}</label><input style={styles.input} type="password" autoComplete={setup || mode === 'reset' ? 'new-password' : 'current-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={mode === 'reset' || setup ? 10 : undefined} maxLength={256} placeholder="10 أحرف على الأقل" />
+      {(setup || mode === 'reset') && <><label style={styles.label}>تأكيد كلمة المرور</label><input style={styles.input} type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)} required minLength={10} maxLength={256} /></>}
       {error && <p role="alert" style={styles.error}>{error}</p>}
-      <button disabled={busy} style={{...styles.submit, opacity:busy ? .72 : 1, cursor:busy ? 'wait' : 'pointer'}}>{busy ? 'لحظة واحدة…' : setup ? 'إنشاء الحساب وفتح البرنامج' : 'تسجيل الدخول'} <span aria-hidden="true">←</span></button>
-      <div style={styles.footerRule} /><p style={styles.foot}>كلمة المرور تُخزّن كبصمة مشتقة مع salt، وليست كنص مكشوف. احفظها في مكان آمن.</p>
+      <button disabled={busy} style={{...styles.submit, opacity:busy ? .72 : 1, cursor:busy ? 'wait' : 'pointer'}}>{busy ? 'لحظة واحدة…' : setup ? 'إنشاء الحساب وفتح البرنامج' : mode === 'reset' ? 'تعيين كلمة المرور' : 'تسجيل الدخول'} <span aria-hidden="true">←</span></button>
+      {!setup && <button type="button" style={styles.link} onClick={()=>{setMode(mode === 'login' ? 'reset' : 'login');setError('');setPassword('');setConfirm('');setRecoveryCode('')}}>{mode === 'login' ? 'نسيت كلمة المرور؟' : 'العودة لتسجيل الدخول'}</button>}
+      <div style={styles.footerRule} /><p style={styles.foot}>{mode === 'reset' ? 'إذا كان حسابك قديمًا ولا تملك رمز استعادة، تواصل مع مؤسسة العربي: 01094990377 أو 01064227445.' : 'كلمة المرور تُخزّن كبصمة مشتقة مع salt، وليست كنص مكشوف. احفظها ورمز الاستعادة في مكان آمن.'}</p>
     </form>}
   </section></main>
 }
@@ -223,24 +256,23 @@ export default function DesktopAuthGate({ children }: { children: ReactNode }) {
 
 
 const styles = {
-  page: { boxSizing:'border-box', minHeight:'100vh', display:'grid', placeItems:'center', padding:'28px 18px', background:'radial-gradient(ellipse at 12% 18%, rgba(190,35,53,.19), transparent 32%), radial-gradient(ellipse at 88% 82%, rgba(32,74,103,.28), transparent 35%), linear-gradient(135deg,#080d13 0%,#101923 52%,#11151c 100%)', fontFamily:'Tahoma, Arial, sans-serif', position:'relative' } as const,
-  card: { boxSizing:'border-box', position:'relative', overflow:'hidden', width:'100%', maxWidth:480, padding:'34px 36px 28px', borderRadius:20, background:'linear-gradient(145deg,rgba(25,32,42,.98),rgba(15,20,28,.99))', color:'#f3f5f8', boxShadow:'0 30px 90px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.035)', border:'1px solid rgba(255,255,255,.09)' } as const,
-  accent: { position:'absolute', top:0, right:28, left:28, height:3, background:'linear-gradient(90deg,transparent,#d52d40,#f05a67,transparent)' } as const,
-  brandHeader: { display:'flex', alignItems:'center', justifyContent:'center', gap:17, padding:'4px 0 24px', borderBottom:'1px solid rgba(255,255,255,.09)' } as const,
-  logo: { flexShrink:0, width:64, height:64, display:'grid', placeItems:'center', borderRadius:17, background:'linear-gradient(145deg,#e53a4d,#9e1728)', border:'1px solid rgba(255,255,255,.13)', boxShadow:'0 10px 28px rgba(194,31,51,.25)', color:'#fff', fontSize:32, fontWeight:900 } as const,
-  brandCopy: { textAlign:'right' } as const,
-  eyebrow: { fontSize:10, letterSpacing:2, color:'#e66b78', fontWeight:800, marginBottom:3 } as const,
-  heading: { margin:'0 0 2px', fontSize:27, lineHeight:1.3, color:'#f8fafc', fontWeight:900 } as const,
-  brandSubtitle: { margin:0, fontSize:12, color:'#9aa8b8', lineHeight:1.8 } as const,
+  page: { boxSizing:'border-box', minHeight:'100vh', display:'grid', placeItems:'center', padding:'28px 18px', background:'radial-gradient(ellipse at 12% 18%, rgba(242,104,34,.16), transparent 32%), radial-gradient(ellipse at 88% 82%, rgba(255,173,87,.08), transparent 35%), #0c0e10', fontFamily:"'Cairo','Segoe UI',Tahoma,Arial,sans-serif", position:'relative' } as const,
+  card: { boxSizing:'border-box', position:'relative', overflow:'hidden', width:'100%', maxWidth:520, padding:'30px 34px 26px', borderRadius:14, background:'linear-gradient(145deg,#1b1d20,#141618)', color:'#f4f1ec', boxShadow:'0 26px 76px rgba(0,0,0,.4)', border:'1px solid #40372e' } as const,
+  accent: { position:'absolute', top:0, right:28, left:28, height:2, background:'linear-gradient(90deg,transparent,#f26822,#ffad57,transparent)' } as const,
+  brandHeader: { display:'flex', alignItems:'center', justifyContent:'center', padding:'8px 0 22px', borderBottom:'1px solid rgba(255,255,255,.1)', textAlign:'center' } as const,
+  brandCopy: { textAlign:'center' } as const,
+  eyebrow: { fontSize:13, letterSpacing:.2, color:'#ffad57', fontWeight:800, marginBottom:3 } as const,
+  heading: { margin:'0 0 2px', fontSize:25, lineHeight:1.5, color:'#fff', fontWeight:900 } as const,
+  brandSubtitle: { margin:0, fontSize:12, color:'#c2beb7', lineHeight:1.8 } as const,
   sectionHead: { display:'flex', alignItems:'flex-start', gap:12, margin:'25px 0 18px' } as const,
-  secureMark: { flexShrink:0, width:34, height:34, display:'grid', placeItems:'center', borderRadius:10, background:'rgba(214,56,74,.12)', border:'1px solid rgba(214,56,74,.24)', color:'#f05a67', fontSize:18, fontWeight:900 } as const,
-  subheading: { margin:'0 0 5px', fontSize:20, color:'#f8fafc', fontWeight:800 } as const,
-  description: { margin:0, color:'#9aa8b8', fontSize:13, lineHeight:1.9 } as const,
-  label: { display:'block', margin:'15px 0 7px', fontWeight:700, fontSize:13, color:'#d5dce5' } as const,
-  input: { boxSizing:'border-box', display:'block', width:'100%', border:'1px solid #354150', borderRadius:10, padding:'13px 14px', background:'#0d131b', color:'#f8fafc', fontSize:14, outlineColor:'#d6384a' } as const,
-  submit: { display:'flex', alignItems:'center', justifyContent:'center', gap:10, width:'100%', marginTop:23, border:'1px solid rgba(255,255,255,.1)', borderRadius:11, padding:'14px 16px', background:'linear-gradient(110deg,#b91f32,#e13a4e)', color:'#fff', fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 9px 24px rgba(177,25,45,.2)' } as const,
+  secureMark: { flexShrink:0, width:36, height:36, display:'grid', placeItems:'center', borderRadius:9, background:'rgba(242,104,34,.12)', border:'1px solid rgba(242,104,34,.28)', color:'#ffad57' } as const,
+  subheading: { margin:'0 0 5px', fontSize:20, color:'#fff', fontWeight:800 } as const,
+  description: { margin:0, color:'#c2beb7', fontSize:13, lineHeight:1.9 } as const,
+  label: { display:'block', margin:'15px 0 7px', fontWeight:700, fontSize:13, color:'#e1ddd5' } as const,
+  input: { boxSizing:'border-box', display:'block', width:'100%', minHeight:46, border:'1px solid #49433d', borderRadius:8, padding:'12px 14px', background:'#111315', color:'#fff', fontSize:14, outlineColor:'#f26822' } as const,
+  submit: { display:'flex', alignItems:'center', justifyContent:'center', gap:10, width:'100%', minHeight:48, marginTop:23, border:'1px solid #f26822', borderRadius:8, padding:'13px 16px', background:'linear-gradient(120deg,#f4772b,#de4f1b)', color:'#17120e', fontWeight:800, fontSize:15, cursor:'pointer', boxShadow:'0 8px 22px rgba(242,104,34,.18)' } as const,
   links: { display:'flex', justifyContent:'center', flexWrap:'wrap', gap:'7px 15px', marginTop:16, fontSize:12 } as const,
-  link: { border:0, background:'transparent', color:'#d5a1a8', cursor:'pointer', padding:'5px 2px', fontWeight:700, fontSize:12 } as const,
+  link: { border:0, background:'transparent', color:'#ffc184', cursor:'pointer', padding:'5px 4px', fontWeight:700, fontSize:12 } as const,
   error: { color:'#ffd8d4', background:'rgba(127,29,29,.24)', border:'1px solid rgba(248,113,113,.24)', padding:12, borderRadius:9, margin:'16px 0 0', lineHeight:1.7, fontSize:13 } as const,
   notice: { color:'#e5eaf0', background:'#222a35', border:'1px solid rgba(255,255,255,.08)', padding:12, borderRadius:9, margin:'16px 0 0', lineHeight:1.7, fontSize:13 } as const,
   footerRule: { height:1, background:'rgba(255,255,255,.09)', marginTop:22 } as const,

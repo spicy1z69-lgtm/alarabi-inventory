@@ -25,6 +25,7 @@ export interface Quote {
   customer: string
   date: string
   items: QuoteItem[]
+  convertedInvoiceId?: string
 }
 
 export interface Invoice {
@@ -40,4 +41,5 @@ export interface Invoice {
   status: 'paid' | 'unpaid' | 'partial'
   paidAmount: number
   notes: string
+  quoteId?: string
 }

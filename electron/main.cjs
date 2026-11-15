@@ -3,8 +3,13 @@ const path = require('node:path')
 const fs = require('node:fs/promises')
 const Database = require('better-sqlite3')
 const crypto = require('node:crypto')
+const { writeStateBundle } = require('./stateStore.cjs')
 
 let db
+let recoveryBackupTimer
+let recoveryBackupRunning = false
+const RECOVERY_BACKUP_INTERVAL_MS = 30 * 60 * 1000
+const RECOVERY_BACKUP_LIMIT = 24
 // Map each renderer to the authenticated Supabase user. A boolean/Set is not
 // sufficient: local records must be scoped to the user, and logout must revoke access.
 const authenticatedContents = new Map()
@@ -15,10 +20,22 @@ function requireAuthenticated(event) {
   return identity.ownerId
 }
 
+function requirePreview(event) {
+  const identity = authenticatedContents.get(event.sender.id)
+  if (!identity || identity.kind !== 'preview' || typeof identity.ownerId !== 'string') {
+    throw new Error('عملية الطباعة متاحة من نافذة معاينة المستند فقط.')
+  }
+  return identity.ownerId
+}
+
 function initializeDatabase() {
   const dbPath = path.join(app.getPath('userData'), 'alarabi-inventory.sqlite3')
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
+  // Make each committed autosave durable before reporting success to the UI.
+  db.pragma('synchronous = FULL')
+  db.pragma('wal_autocheckpoint = 1000')
+  db.pragma('busy_timeout = 5000')
   db.pragma('foreign_keys = ON')
 
   const existing = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'").get()
@@ -49,6 +66,8 @@ function initializeDatabase() {
       username_normalized TEXT NOT NULL UNIQUE,
       password_salt BLOB NOT NULL,
       password_hash BLOB NOT NULL,
+      recovery_salt BLOB,
+      recovery_hash BLOB,
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -56,6 +75,14 @@ function initializeDatabase() {
       applied_at TEXT NOT NULL
     );
   `)
+
+  const localUserColumns = db.prepare('PRAGMA table_info(local_users)').all()
+  if (!localUserColumns.some(column => column.name === 'recovery_salt')) {
+    db.exec('ALTER TABLE local_users ADD COLUMN recovery_salt BLOB')
+  }
+  if (!localUserColumns.some(column => column.name === 'recovery_hash')) {
+    db.exec('ALTER TABLE local_users ADD COLUMN recovery_hash BLOB')
+  }
 }
 
 function registerAuthHandlers() {
@@ -113,16 +140,48 @@ function registerLocalAuthHandlers() {
     }
     const salt = crypto.randomBytes(16)
     const passwordHash = crypto.scryptSync(password, salt, 64)
+    const recoveryKey = createRecoveryKey()
+    const recoverySalt = crypto.randomBytes(16)
+    const recoveryHash = crypto.scryptSync(normalizeRecoveryKey(recoveryKey), recoverySalt, 64)
     const id = crypto.randomUUID()
     try {
-      db.prepare('INSERT INTO local_users (id, username, username_normalized, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(id, username.trim(), username.trim().toLocaleLowerCase(), salt, passwordHash, new Date().toISOString())
+      db.prepare('INSERT INTO local_users (id, username, username_normalized, password_salt, password_hash, recovery_salt, recovery_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, username.trim(), username.trim().toLocaleLowerCase(), salt, passwordHash, recoverySalt, recoveryHash, new Date().toISOString())
     } catch {
       throw new Error('تعذر إنشاء الحساب المحلي.')
     }
     const identity = { kind: 'local', ownerId: 'local:' + id, username: username.trim() }
     authenticatedContents.set(event.sender.id, identity)
-    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username } }
+    return { ok: true, session: { ownerId: identity.ownerId, username: identity.username }, recoveryKey }
+  })
+
+  ipcMain.handle('auth:local-reset-password', (event, username, recoveryKey, newPassword) => {
+    if (typeof username !== 'string' || username.trim().length > 40 || typeof recoveryKey !== 'string' || recoveryKey.length > 64 || typeof newPassword !== 'string' || newPassword.length < 10 || newPassword.length > 256) {
+      throw new Error('راجع اسم المستخدم ورمز الاستعادة وكلمة المرور الجديدة.')
+    }
+    const row = db.prepare('SELECT id, username, recovery_salt, recovery_hash FROM local_users WHERE username_normalized = ?')
+      .get(username.trim().toLocaleLowerCase())
+    if (!row?.recovery_salt || !row?.recovery_hash) {
+      throw new Error('لا يوجد رمز استعادة لهذا الحساب القديم. تواصل مع دعم مؤسسة العربي على 01094990377 أو 01064227445.')
+    }
+    let matches = false
+    try {
+      const actualRecoveryHash = crypto.scryptSync(normalizeRecoveryKey(recoveryKey), row.recovery_salt, 64)
+      matches = crypto.timingSafeEqual(actualRecoveryHash, row.recovery_hash)
+    } catch {
+      matches = false
+    }
+    if (!matches) throw new Error('اسم المستخدم أو رمز الاستعادة غير صحيح.')
+
+    const passwordSalt = crypto.randomBytes(16)
+    const passwordHash = crypto.scryptSync(newPassword, passwordSalt, 64)
+    const nextRecoveryKey = createRecoveryKey()
+    const nextRecoverySalt = crypto.randomBytes(16)
+    const nextRecoveryHash = crypto.scryptSync(normalizeRecoveryKey(nextRecoveryKey), nextRecoverySalt, 64)
+    db.prepare('UPDATE local_users SET password_salt = ?, password_hash = ?, recovery_salt = ?, recovery_hash = ? WHERE id = ?')
+      .run(passwordSalt, passwordHash, nextRecoverySalt, nextRecoveryHash, row.id)
+    authenticatedContents.delete(event.sender.id)
+    return { ok: true, recoveryKey: nextRecoveryKey }
   })
 
   ipcMain.handle('auth:local-login', (event, username, password) => {
@@ -155,6 +214,14 @@ function registerLocalAuthHandlers() {
   })
 }
 
+function createRecoveryKey() {
+  return crypto.randomBytes(16).toString('hex').toUpperCase().match(/.{1,4}/g).join('-')
+}
+
+function normalizeRecoveryKey(value) {
+  return value.replace(/[^a-fA-F0-9]/g, '').toUpperCase()
+}
+
 function registerDatabaseHandlers() {
   ipcMain.handle('local-state:read-all', (event) => {
     const ownerId = requireAuthenticated(event)
@@ -180,6 +247,49 @@ function registerDatabaseHandlers() {
     `).run(ownerId, key, serialized, new Date().toISOString())
     return { ok: true }
   })
+
+  ipcMain.handle('local-state:write-bundle', (event, records) => {
+    const ownerId = requireAuthenticated(event)
+    return writeStateBundle(db, ownerId, records)
+  })
+
+  // A synchronous final flush protects the very last UI change when the user
+  // closes the window before the normal asynchronous autosave finishes.
+  ipcMain.on('local-state:write-bundle-sync', (event, records) => {
+    try {
+      const ownerId = requireAuthenticated(event)
+      event.returnValue = writeStateBundle(db, ownerId, records)
+    } catch (error) {
+      event.returnValue = { ok: false, error: error instanceof Error ? error.message : 'تعذر حفظ البيانات قبل الإغلاق.' }
+    }
+  })
+}
+
+async function createRecoveryBackup() {
+  if (!db?.open || db.inTransaction || recoveryBackupRunning) return
+  recoveryBackupRunning = true
+  try {
+    const backupDirectory = path.join(app.getPath('userData'), 'recovery-backups')
+    await fs.mkdir(backupDirectory, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `alarabisystem-recovery-${stamp}.sqlite3`
+    await db.backup(path.join(backupDirectory, filename))
+
+    const files = (await fs.readdir(backupDirectory))
+      .filter(name => name.startsWith('alarabisystem-recovery-') && name.endsWith('.sqlite3'))
+      .sort()
+      .reverse()
+    await Promise.all(files.slice(RECOVERY_BACKUP_LIMIT).map(name => fs.unlink(path.join(backupDirectory, name))))
+  } finally {
+    recoveryBackupRunning = false
+  }
+}
+
+function scheduleRecoveryBackups() {
+  recoveryBackupTimer = setInterval(() => {
+    void createRecoveryBackup().catch(error => console.error('Automatic database backup failed:', error))
+  }, RECOVERY_BACKUP_INTERVAL_MS)
+  recoveryBackupTimer.unref?.()
 }
 
 ipcMain.handle('invoice:print-html', async (event, html) => {
@@ -192,9 +302,7 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
   // The invoice remains viewable even when Windows has no printer installed.
   const parent = BrowserWindow.fromWebContents(event.sender)
   const previewHtml = html
-    .split('onclick="window.print()"').join("onclick=\"window.alarabiDesktop.savePreviewPdf().then(result => { if (result.ok) alert('تم حفظ ملف PDF بنجاح') }).catch(error => alert('تعذر حفظ PDF: ' + error.message))\"")
-    .split('طباعة الفاتورة / حفظ PDF').join('حفظ الفاتورة PDF')
-    .split('طباعة عرض السعر / حفظ PDF').join('حفظ عرض السعر PDF')
+    .split('onclick="window.print()"').join("onclick=\"window.alarabiDesktop.printPreview().then(result => { if (!result.ok && !result.cancelled) alert('تعذرت الطباعة') }).catch(error => alert('تعذرت الطباعة: ' + error.message))\"")
 
   const previewWindow = new BrowserWindow({
     width: 1000,
@@ -242,8 +350,23 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
   }
 })
 
+ipcMain.handle('invoice:print-preview', (event) => {
+  requirePreview(event)
+  const previewWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!previewWindow || previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
+    throw new Error('نافذة المعاينة غير متاحة.')
+  }
+  return new Promise((resolve, reject) => {
+    previewWindow.webContents.print({ printBackground: true, pageSize: 'A4' }, (success, failureReason) => {
+      if (success) resolve({ ok: true })
+      else if (failureReason === 'Print job canceled') resolve({ ok: false, cancelled: true })
+      else reject(new Error(failureReason || 'فشل إرسال المستند إلى الطابعة.'))
+    })
+  })
+})
+
 ipcMain.handle('invoice:save-preview-pdf', async (event) => {
-  requireAuthenticated(event)
+  requirePreview(event)
   const previewWindow = BrowserWindow.fromWebContents(event.sender)
   if (!previewWindow || previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
     throw new Error('نافذة المعاينة غير متاحة.')
@@ -267,6 +390,7 @@ ipcMain.handle('invoice:save-preview-pdf', async (event) => {
 
 function createWindow() {
   const win = new BrowserWindow({
+    title: 'alarabisystem',
     width: 1440,
     height: 960,
     minWidth: 1000,
@@ -283,7 +407,7 @@ function createWindow() {
   // Electron may not deliver Ctrl+K reliably through DOM keydown in packaged Windows builds.
   // Intercept it at the main-process boundary and notify the renderer through the narrow preload API.
   win.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && input.key.toLowerCase() === 'k' && (input.control || input.meta)) {
+    if (input.type === 'keyDown' && !input.isAutoRepeat && (input.key?.toLowerCase() === 'k' || input.code === 'KeyK') && (input.control || input.meta)) {
       event.preventDefault()
       win.webContents.send('shortcut:quick-search')
     }
@@ -293,11 +417,17 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   initializeDatabase()
   registerAuthHandlers()
   registerLocalAuthHandlers()
   registerDatabaseHandlers()
+  try {
+    await createRecoveryBackup()
+  } catch (error) {
+    console.error('Initial database backup failed:', error)
+  }
+  scheduleRecoveryBackups()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -309,6 +439,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  if (recoveryBackupTimer) clearInterval(recoveryBackupTimer)
   authenticatedContents.clear()
-  if (db) db.close()
+  if (db?.open) {
+    db.pragma('wal_checkpoint(FULL)')
+    db.close()
+  }
 })
