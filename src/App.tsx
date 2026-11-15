@@ -1196,7 +1196,7 @@ function InventoryApp({ user }: { user: AppUser }) {
   }
 
   const shareDocumentOnWhatsApp = (kind: 'فاتورة بيع' | 'عرض سعر', number: string, customerName: string, date: string, total: number, balance?: number) => {
-    const text = [`${COMPANY}`, kind, `رقم المستند: ${number}`, `العميل: ${customerName}`, `التاريخ: ${date}`, `الإجمالي: ${money(total)}`, ...(balance === undefined ? [] : [`المتبقي: ${money(balance)}`]), 'مرفق نسخة المستند بصيغة PDF.'].join('\n')
+    const text = [`${COMPANY}`, kind, `رقم المستند: ${number}`, `العميل: ${customerName}`, `التاريخ: ${date}`, `الإجمالي: ${money(total)}`, ...(balance === undefined ? [] : [`المتبقي: ${money(balance)}`]), 'يمكن طباعة المستند أو حفظه PDF من البرنامج.'].join('\n')
     window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener,noreferrer')
   }
 
@@ -1261,7 +1261,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.4</small>
+          <small>v1.1.5</small>
         </div>
       </aside>
 
