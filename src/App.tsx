@@ -1155,7 +1155,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.1</small>
+          <small>v1.1.2</small>
         </div>
       </aside>
 
@@ -1717,10 +1717,9 @@ function InventoryApp({ user }: { user: AppUser }) {
                 const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون'];
                 const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
                 const title=reportKind==='sales'?'تقرير المبيعات والفواتير':reportKind==='cash'?'تقرير الخزنة والحركة المالية':'تقرير الأصناف والمخزون';
-                const esc=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                const table='<table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
-                const w=window.open('','_blank');if(!w){setNotice('اسمح بفتح النوافذ المنبثقة لطباعة التقرير');return}
-                w.document.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>'+title+'</title><style>body{font:12px Tahoma,Arial,sans-serif;color:#263746;padding:20px}h1{color:#173653;border-right:5px solid #c83d46;padding-right:12px}.brand{border-bottom:3px solid #c83d46;padding-bottom:12px;margin-bottom:18px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#173653;color:white}th,td{border:1px solid #cfd7df;padding:8px;text-align:right}tr:nth-child(even){background:#f1f4f7}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="brand"><h1>'+title+'</h1><strong>'+COMPANY+'</strong><p>الفترة: '+(reportFrom||'من البداية')+' — '+(reportTo||'حتى اليوم')+' | تاريخ التصدير: '+today()+'</p></div>'+table+'<script>window.onload=()=>window.print()</script></body></html>');w.document.close()
+                const table='<table><thead><tr>'+headers.map(h=>'<th>'+escapeHtml(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+escapeHtml(String(v??''))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+                const html='<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+escapeHtml(title)+'</title><style>body{font:12px Tahoma,Arial,sans-serif;color:#263746;padding:20px}.actions{display:flex;gap:8px;justify-content:flex-start;margin:0 0 16px}.actions button{border:0;border-radius:6px;padding:9px 14px;background:#173653;color:white;font-weight:bold;cursor:pointer}.actions button.secondary{background:#edf1f5;color:#263746}.brand{border-bottom:3px solid #c83d46;padding-bottom:12px;margin-bottom:18px}h1{color:#173653;border-right:5px solid #c83d46;padding-right:12px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#173653;color:white}th,td{border:1px solid #cfd7df;padding:8px;text-align:right}tr:nth-child(even){background:#f1f4f7}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">طباعة التقرير</button><button class="secondary" onclick="if(window.alarabiDesktop){window.alarabiDesktop.savePreviewPdf().then(r=>{if(r.ok)alert(&#39;تم حفظ التقرير PDF&#39;)}).catch(e=>alert(&#39;تعذر حفظ PDF: &#39;+e.message))}else{window.print()}">حفظ PDF</button></div><div class="brand"><h1>'+escapeHtml(title)+'</h1><strong>'+escapeHtml(COMPANY)+'</strong><p>الفترة: '+escapeHtml(reportFrom||'من البداية')+' — '+escapeHtml(reportTo||'حتى اليوم')+' | تاريخ التصدير: '+escapeHtml(today())+'</p></div>'+table+'</body></html>';
+                printDocument(html,'التقرير')
               }}><Printer size={16}/> طباعة / حفظ PDF</button>
             </div></div>
             <div className="table-wrap"><table><thead><tr>{(reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['الكود','الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون']).map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>
@@ -2337,6 +2336,7 @@ function BrandedLoadingScreen({ caption }: { caption: string }) {
     <div className="loading-track"><span /></div>
   </main>
 }
+
 
 
 

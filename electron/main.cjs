@@ -300,10 +300,11 @@ function scheduleRecoveryBackups() {
   recoveryBackupTimer.unref?.()
 }
 
-ipcMain.handle('invoice:print-html', async (event, html) => {
+async function createPrintPreview(event, documentInput) {
   const ownerId = requireAuthenticated(event)
+  const html = typeof documentInput === 'string' ? documentInput : documentInput?.html
   if (typeof html !== 'string' || html.length > 5_000_000) {
-    throw new Error('Invalid print document')
+    throw new Error('بيانات المستند غير صالحة للطباعة. حدّث التطبيق ثم أعد المحاولة.')
   }
 
   // This is a preview window inside the desktop app, not a native print dialog.
@@ -354,9 +355,14 @@ ipcMain.handle('invoice:print-html', async (event, html) => {
     return { ok: true, preview: true }
   } catch (error) {
     if (!previewWindow.isDestroyed()) previewWindow.close()
-    throw new Error('فشل فتح معاينة الفاتورة: ' + (error instanceof Error ? error.message : String(error)))
+    throw new Error('فشل فتح معاينة المستند: ' + (error instanceof Error ? error.message : String(error)))
   }
-})
+}
+
+ipcMain.handle('invoice:print-html', createPrintPreview)
+// Keep the earlier channel available so older renderer/preload bundles still
+// open the same safe preview instead of failing with "No handler registered".
+ipcMain.handle('invoice:print', createPrintPreview)
 
 ipcMain.handle('invoice:print-preview', (event) => {
   requirePreview(event)
