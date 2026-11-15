@@ -10,7 +10,7 @@ import alarabiWatermarkDataUrl from './assets/alarabi-watermark.png?inline'
 import { supabase } from './lib/supabase'
 import {
   Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck, Upload, RotateCcw,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck, Upload, RotateCcw, MessageCircle,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
 import { cashDifferenceFor, invoiceGrandTotalFor, invoiceTaxFor, itemsSubtotalFor, lineTotalFor, outstandingBalanceFor, roundMoney, weightedAverageCostFor } from './lib/money'
@@ -557,6 +557,14 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   const lowStock = products.filter(p => p.quantity <= p.minStock)
   const activeInvoices = invoices.filter(invoice => !(invoice as Invoice & { returned?: boolean }).returned)
+  const recentSales = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() - (6 - index))
+    const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`
+    return { date: key, label: date.toLocaleDateString('ar-EG', { weekday: 'short' }), total: roundMoney(activeInvoices.filter(invoice => invoice.date === key).reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)) }
+  })
+  const bestSellingProducts = activeInvoices.flatMap(invoice => invoice.items || []).reduce((totals, item) => { totals.set(item.productId, (totals.get(item.productId) || 0) + item.quantity); return totals }, new Map<string, number>())
+  const topProducts = [...bestSellingProducts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,quantity])=>({name: products.find(p=>p.id===id)?.name || activeInvoices.flatMap(i=>i.items||[]).find(item=>item.productId===id)?.name || 'صنف محذوف', quantity}))
+  const maxDailySales = Math.max(1, ...recentSales.map(day=>day.total))
   const reportInvoices = activeInvoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
   const reportCash = cashEntries.filter(e => (!reportFrom || e.date >= reportFrom) && (!reportTo || e.date <= reportTo))
   const reportSales = reportInvoices.reduce((sum, i) => sum + invoiceTotalFor(i), 0)
@@ -1187,6 +1195,11 @@ function InventoryApp({ user }: { user: AppUser }) {
     const win=window.open('','_blank'); if(!win){setNotice('اسمح بفتح نافذة كشف الحساب');return} win.document.write(html);win.document.close()
   }
 
+  const shareDocumentOnWhatsApp = (kind: 'فاتورة بيع' | 'عرض سعر', number: string, customerName: string, date: string, total: number, balance?: number) => {
+    const text = [`${COMPANY}`, kind, `رقم المستند: ${number}`, `العميل: ${customerName}`, `التاريخ: ${date}`, `الإجمالي: ${money(total)}`, ...(balance === undefined ? [] : [`المتبقي: ${money(balance)}`]), 'مرفق نسخة المستند بصيغة PDF.'].join('\n')
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener,noreferrer')
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1248,7 +1261,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.3</small>
+          <small>v1.1.4</small>
         </div>
       </aside>
 
@@ -1375,6 +1388,11 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
               <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? `بيانات مكتملة لـ ${costCompleteInvoices.length} من ${invoices.length} فاتورة` : 'حسب تكلفة الشراء المحفوظة بالفواتير'} warning={hasMissingCosts} />
               <Stat icon={<CircleDollarSign />} label="صافي تقديري بعد المصروفات" value={money(knownNetProfit)} foot={hasMissingCosts ? 'يشمل الفواتير المكتملة التكلفة فقط؛ قبل الضريبة' : 'هامش البيع ناقص المصروفات المسجلة'} warning={hasMissingCosts} />
+            </section>
+
+            <section className="dashboard-insights">
+              <div className="panel"><div className="panel-head"><div><h3>المبيعات خلال آخر 7 أيام</h3><p>إجمالي قيمة الفواتير النشطة حسب تاريخها</p></div></div><div className="sales-bars">{recentSales.map(day=><div className="sales-bar-item" key={day.date} title={`${day.date}: ${money(day.total)}`}><strong>{day.total ? money(day.total) : '—'}</strong><div className="sales-bar-track"><span style={{height:`${Math.max(day.total ? 8 : 2, day.total/maxDailySales*100)}%`}}/></div><small>{day.label}</small></div>)}</div></div>
+              <div className="panel"><div className="panel-head"><div><h3>الأكثر مبيعًا</h3><p>بالكمية المسجلة في الفواتير</p></div></div>{topProducts.length?<ol className="top-products">{topProducts.map((item,index)=><li key={item.name+index}><span>{item.name}</span><b>{item.quantity} وحدة</b></li>)}</ol>:<p className="muted">ستظهر الأصناف بعد تسجيل فواتير البيع.</p>}</div>
             </section>
 
             <section className="panel">
@@ -1866,6 +1884,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                     <td><span className={(inv as Invoice & {returned?:boolean}).returned ? 'pill warning' : inv.status === 'paid' ? 'pill success' : 'pill danger'}>{(inv as Invoice & {returned?:boolean}).returned ? 'مرتجعة' : inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
                     <td className="actions">
                       <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
+                      <button className="secondary-btn invoice-status-btn" onClick={() => shareDocumentOnWhatsApp('فاتورة بيع', inv.number, inv.customer, inv.date, total, (inv as Invoice & {returned?:boolean}).returned ? 0 : balance)}><MessageCircle size={14}/> واتساب</button>
                       <button className="secondary-btn invoice-status-btn" onClick={() => printCustomerStatement(inv.customer)}>كشف العميل</button>
                       {inv.status !== 'paid' && !(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
                       {!(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => returnInvoice(inv)} title="تسجيل مرتجع كامل وإعادة الكميات للمخزون"><RotateCcw size={14}/> مرتجع</button>}
@@ -1928,6 +1947,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                     >
                       <Printer size={17} />
                     </button>
+                    <button className="secondary-btn quote-convert-btn" onClick={() => shareDocumentOnWhatsApp('عرض سعر', q.number, q.customer, q.date, itemsSubtotalFor(q.items))}><MessageCircle size={14}/> واتساب</button>
                     <button className="icon-btn delete" aria-label="حذف عرض السعر" title="حذف عرض السعر" onClick={() => deleteQuote(q)}>
                       <Trash2 size={17} />
                     </button>
