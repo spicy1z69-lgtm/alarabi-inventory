@@ -8,6 +8,7 @@ export interface Product {
   price: number
   costPrice?: number
   minStock: number
+  targetStock?: number
 }
 
 export interface QuoteItem {
@@ -26,6 +27,10 @@ export interface Quote {
   date: string
   items: QuoteItem[]
   convertedInvoiceId?: string
+  phone?: string
+  followUpDate?: string
+  validUntil?: string
+  status?: 'new' | 'follow-up' | 'accepted' | 'declined' | 'expired'
 }
 
 export interface Invoice {

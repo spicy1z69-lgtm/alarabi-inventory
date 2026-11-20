@@ -9,7 +9,7 @@ import alarabiWatermarkDataUrl from './assets/alarabi-watermark.png?inline'
 
 import { supabase } from './lib/supabase'
 import {
-  Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
+  Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil, Copy,
   Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck, Upload, RotateCcw, MessageCircle,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
@@ -247,6 +247,8 @@ function InventoryApp({ user }: { user: AppUser }) {
     return () => window.clearTimeout(timeout)
   }, [notice])
   const [customer, setCustomer] = useState('')
+  const [quotePhone, setQuotePhone] = useState('')
+  const [quoteFollowUpDate, setQuoteFollowUpDate] = useState('')
   const [quoteRows, setQuoteRows] = useState<QuoteItem[]>([])
   const [draft, setDraft] = useState({
     code: '',
@@ -256,8 +258,11 @@ function InventoryApp({ user }: { user: AppUser }) {
     price: '0',
     costPrice: '0',
     minStock: '2',
+    targetStock: '10',
   })
   const [stockMovementModal, setStockMovementModal] = useState(false)
+  const [stocktakeOpen, setStocktakeOpen] = useState(false)
+  const [stocktakeCounts, setStocktakeCounts] = useState<Record<string, string>>({})
   const [movementProductId, setMovementProductId] = useState('')
   const [movementKind, setMovementKind] = useState<'in' | 'out'>('in')
   const [movementQuantity, setMovementQuantity] = useState('')
@@ -489,7 +494,8 @@ function InventoryApp({ user }: { user: AppUser }) {
         setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
         return
       }
-      const confirmed = window.confirm('تنبيه: استرجاع النسخة سيستبدل بيانات الأصناف وعروض الأسعار والفواتير والخزنة وحركات المخزون الحالية. هل حفظت نسخة من البيانات الحالية وتريد المتابعة؟')
+      const preview = `محتويات الملف: ${data.products.length} صنف، ${data.invoices.length} فاتورة، ${data.quotes.length} عرض سعر، ${data.cashEntries.length} حركة خزنة.\n\nسيستبدل هذا بيانات البرنامج الحالية. هل تريد المتابعة؟`
+      const confirmed = window.confirm(preview)
       if (!confirmed) return
       setProducts(data.products)
       setQuotes(data.quotes)
@@ -597,7 +603,7 @@ function InventoryApp({ user }: { user: AppUser }) {
   }, 0)
   const estimatedGrossProfit = knownSalesBeforeTax - knownCostSales
   const knownNetProfit = roundMoney(estimatedGrossProfit - expenseTotal)
-  const activeOverdueQuotes = quotes.filter(quote => quote.date < today() && !invoices.some(invoice => invoice.quoteId === quote.id || invoice.id === quote.convertedInvoiceId))
+  const activeOverdueQuotes = quotes.filter(quote => quote.status !== 'declined' && quote.status !== 'accepted' && quote.followUpDate && quote.followUpDate <= today() && !invoices.some(invoice => invoice.quoteId === quote.id || invoice.id === quote.convertedInvoiceId))
   const dueCustomerInvoices = activeInvoices.filter(invoice => invoice.dueDate && invoice.dueDate < today() && invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
 
   const quickSearchResults = useMemo(() => {
@@ -695,6 +701,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             price: String(p.price),
             costPrice: String(p.costPrice ?? 0),
             minStock: String(p.minStock),
+            targetStock: String(p.targetStock ?? Math.max(p.minStock + 1, p.minStock * 3)),
           }
         : {
             code: '',
@@ -704,6 +711,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             price: '0',
             costPrice: '0',
             minStock: '2',
+            targetStock: '10',
           }
     )
     setProductModal(p ?? 'new')
@@ -722,6 +730,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       { label: 'سعر البيع', value: draft.price },
       { label: 'سعر التكلفة', value: draft.costPrice },
       { label: 'حد التنبيه', value: draft.minStock },
+      { label: 'المخزون المستهدف', value: draft.targetStock },
     ]
     for (const field of numericFields) {
       const value = Number(field.value)
@@ -753,6 +762,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       price: roundMoney(Number(draft.price)),
       costPrice: roundMoney(Number(draft.costPrice)),
       minStock: Number(draft.minStock),
+      targetStock: Number(draft.targetStock),
     }
 
     setProducts(old =>
@@ -773,6 +783,37 @@ function InventoryApp({ user }: { user: AppUser }) {
     setMovementReason('')
     setMovementReference('')
     setStockMovementModal(true)
+  }
+
+  const beginStocktake = () => {
+    setStocktakeCounts(Object.fromEntries(products.map(product => [product.id, String(product.quantity)])))
+    setStocktakeOpen(true)
+  }
+
+  const saveStocktake = () => {
+    const changes = products.map(product => {
+      const raw = stocktakeCounts[product.id]
+      const count = Number(raw)
+      return { product, count }
+    })
+    if (changes.some(({ count }) => !Number.isInteger(count) || count < 0)) {
+      setNotice('أدخل كميات جرد صحيحة كأعداد صحيحة موجبة أو صفر')
+      return
+    }
+    const changed = changes.filter(({ product, count }) => count !== product.quantity)
+    if (!changed.length) { setStocktakeOpen(false); setNotice('الجرد مطابق للكميات المسجلة'); return }
+    if (!window.confirm(`سيتم تسجيل ${changed.length} تسوية مخزون حسب الكميات الفعلية. هل راجعت الأرقام؟`)) return
+    const timestamp = new Date().toISOString()
+    setProducts(old => old.map(product => {
+      const counted = changes.find(entry => entry.product.id === product.id)?.count
+      return counted === undefined ? product : { ...product, quantity: counted }
+    }))
+    setStockMovements(old => [
+      ...changed.map(({ product, count }) => ({ id: crypto.randomUUID(), productId: product.id, productName: product.name, kind: count >= product.quantity ? 'in' as const : 'out' as const, quantity: Math.abs(count - product.quantity), reason: 'تسوية جرد', reference: `جرد ${today()}`, date: timestamp, quantityBefore: product.quantity, quantityAfter: count })),
+      ...old,
+    ])
+    setStocktakeOpen(false)
+    setNotice(`تم حفظ الجرد وتسجيل ${changed.length} تسوية في سجل الحركة`)
   }
 
   const saveStockMovement = () => {
@@ -1132,18 +1173,36 @@ function InventoryApp({ user }: { user: AppUser }) {
       customer: customer.trim(),
       date: today(),
       items: quoteRows,
+      phone: quotePhone.trim(),
+      followUpDate: quoteFollowUpDate || undefined,
+      validUntil: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+      status: 'new',
     }
 
     setQuotes(old => [quote, ...old])
     setQuoteModal(false)
     setTab('quotes')
     setCustomer('')
+    setQuotePhone('')
+    setQuoteFollowUpDate('')
     setQuoteRows([])
     setNotice('تم حفظ عرض السعر')
   }
 
   const printQuote = (q: Quote) => {
     printDocument(quoteHtml(q), 'عرض السعر')
+  }
+
+  const updateQuote = (quote: Quote, patch: Partial<Quote>) => {
+    setQuotes(old => old.map(item => item.id === quote.id ? { ...item, ...patch } : item))
+  }
+
+  const duplicateQuote = (quote: Quote) => {
+    setCustomer(quote.customer)
+    setQuotePhone(quote.phone || '')
+    setQuoteFollowUpDate('')
+    setQuoteRows(quote.items.map(item => ({ ...item })))
+    setQuoteModal(true)
   }
 
   const convertQuoteToInvoice = (quote: Quote) => {
@@ -1155,7 +1214,7 @@ function InventoryApp({ user }: { user: AppUser }) {
     }
     setConvertingQuoteId(quote.id)
     setInvoiceCustomer(quote.customer)
-    setInvoicePhone('')
+    setInvoicePhone(quote.phone || '')
     setInvoiceDueDate('')
     setInvoiceDiscount('0')
     setInvoiceTax('0')
@@ -1272,7 +1331,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.6</small>
+          <small>v1.1.7</small>
         </div>
       </aside>
 
@@ -1523,6 +1582,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                         <th>الكود</th>
                         <th>الكمية الحالية</th>
                         <th>الحد الأدنى</th>
+                        <th>كمية الشراء المقترحة</th>
                         <th>الحالة</th>
                       </tr>
                     </thead>
@@ -1534,6 +1594,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                           <td><code>{p.code}</code></td>
                           <td>{p.quantity}</td>
                           <td>{p.minStock}</td>
+                          <td><b>{Math.max(0, (p.targetStock ?? Math.max(p.minStock + 1, p.minStock * 3)) - p.quantity)}</b></td>
                           <td>
                             <span className="pill danger">
                               مخزون منخفض
@@ -1639,6 +1700,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 <button className="secondary-button" onClick={recordStockMovement}>
                   <Boxes size={17} /> تسجيل حركة مخزون
                 </button>
+                <button className="secondary-button" onClick={beginStocktake}><ClipboardList size={17} /> جرد المخزون</button>
                 <button className="primary-btn" onClick={() => openProduct()}>
                   <Plus size={17} /> إضافة صنف
                 </button>
@@ -1937,7 +1999,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                     <div className="quote-info">
                       <b>{q.number}</b>
                       <span>
-                        {q.customer} · {q.date} · {q.items.length} صنف
+                        {q.customer} · {q.date} · {q.items.length} صنف{q.phone ? ' · ' + q.phone : ''}{q.followUpDate ? ' · متابعة ' + q.followUpDate : ''}
                       </span>
                     </div>
 
@@ -1950,6 +2012,10 @@ function InventoryApp({ user }: { user: AppUser }) {
                     ) : (
                       <button className="secondary-btn quote-convert-btn" onClick={() => convertQuoteToInvoice(q)}><Receipt size={15} /> تم التنفيذ — إنشاء فاتورة</button>
                     )}
+
+                    {!invoices.some(invoice => invoice.id === q.convertedInvoiceId || invoice.quoteId === q.id) && <select aria-label="حالة عرض السعر" value={q.status || 'new'} onChange={e => updateQuote(q, { status: e.target.value as NonNullable<Quote['status']> })}><option value="new">جديد</option><option value="follow-up">متابعة</option><option value="accepted">مقبول</option><option value="declined">مرفوض</option><option value="expired">منتهي</option></select>}
+                    <input className="quote-date-filter" aria-label="موعد متابعة العرض" title="موعد المتابعة" type="date" value={q.followUpDate || ''} onChange={e => updateQuote(q, { followUpDate: e.target.value || undefined })} />
+                    <button className="secondary-btn quote-convert-btn" onClick={() => duplicateQuote(q)} title="إنشاء عرض جديد بنفس الأصناف والبيانات"><Copy size={14}/> نسخة جديدة</button>
 
                     <button
                       className="icon-btn"
@@ -1974,6 +2040,16 @@ function InventoryApp({ user }: { user: AppUser }) {
           </section>
         )}
       </main>
+
+      {stocktakeOpen && (
+        <div className="modal-backdrop" onClick={() => setStocktakeOpen(false)}>
+          <section className="modal wide" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div className="modal-head"><div><h2>جرد المخزون</h2><p>أدخل الكمية الفعلية؛ ستظهر التسويات في سجل حركة المخزون بعد التأكيد.</p></div><button className="icon-btn" onClick={() => setStocktakeOpen(false)} aria-label="إغلاق"><X /></button></div>
+            <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الكود</th><th>المسجل بالنظام</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{products.map(product => { const counted = Number(stocktakeCounts[product.id]); const difference = (Number.isFinite(counted) ? counted : product.quantity) - product.quantity; return <tr key={product.id}><td>{product.name}</td><td>{product.code}</td><td>{product.quantity}</td><td><input aria-label={'الكمية الفعلية ' + product.name} type="number" min="0" step="1" value={stocktakeCounts[product.id] ?? product.quantity} onChange={e => setStocktakeCounts(old => ({ ...old, [product.id]: e.target.value }))} /></td><td className={difference < 0 ? 'text-danger' : ''}>{difference > 0 ? '+' : ''}{difference}</td></tr> })}</tbody></table></div>
+            <div className="modal-actions"><button className="secondary-btn" onClick={() => setStocktakeOpen(false)}>إلغاء</button><button className="primary-btn" onClick={saveStocktake}><Check size={16}/> اعتماد الجرد</button></div>
+          </section>
+        </div>
+      )}
 
       {stockMovementModal && (
         <div className="modal-backdrop" onClick={() => setStockMovementModal(false)}>
@@ -2084,6 +2160,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 value={draft.minStock}
                 onChange={v => setDraft({ ...draft, minStock: v })}
               />
+              <Field label="المخزون المستهدف بعد الشراء" type="number" value={draft.targetStock} onChange={v => setDraft({ ...draft, targetStock: v })} />
             </div>
 
             <div className="modal-actions">
@@ -2131,6 +2208,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               onChange={setCustomer}
               placeholder="اسم العميل أو الشركة"
             />
+            <div className="form-grid"><Field label="رقم هاتف العميل" value={quotePhone} onChange={setQuotePhone} placeholder="01xxxxxxxxx" /><Field label="موعد متابعة العرض (اختياري)" type="date" value={quoteFollowUpDate} onChange={setQuoteFollowUpDate} /></div>
 
             <div className="pick-products">
               <h4>إضافة أصناف</h4>
@@ -2349,8 +2427,8 @@ function quoteHtml(q: Quote) {
     '<tr><td class="cell-num">' + (index + 1) + '</td><td class="ltr">' + escapeHtml(item.code) + '</td><td><strong class="line-name">' + escapeHtml(item.name) + '</strong></td><td class="cell-num">' + item.quantity + '</td><td class="cell-money">' + money(item.price) + '</td><td class="cell-money">' + money(lineTotalFor(item)) + '</td></tr>'
   ).join('') : '<tr><td class="empty-row" colspan="6">لا توجد أصناف في العرض.</td></tr>'
   return documentFrame('عرض سعر', 'QUOTATION', q.number, dateLabel,
-    '<div class="party-card"><h3>بيانات العميل</h3><div class="party-line"><span>اسم العميل / الشركة</span><b>' + escapeHtml(q.customer) + '</b></div><div class="party-line"><span>رقم الهاتف</span><b>—</b></div><div class="party-line"><span>العنوان</span><b>—</b></div><div class="party-line"><span>تاريخ العرض</span><b>' + dateLabel + '</b></div></div>' +
-    '<div class="party-card"><h3>بيانات العرض</h3><div class="party-line"><span>رقم العرض</span><b class="ltr">' + escapeHtml(q.number) + '</b></div><div class="party-line"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="party-line"><span>مدة الصلاحية</span><b>7 أيام</b></div><div class="party-line"><span>طريقة الدفع</span><b>نقدًا / تحويل بنكي</b></div></div>',
+    '<div class="party-card"><h3>بيانات العميل</h3><div class="party-line"><span>اسم العميل / الشركة</span><b>' + escapeHtml(q.customer) + '</b></div><div class="party-line"><span>رقم الهاتف</span><b>' + escapeHtml(q.phone || '—') + '</b></div><div class="party-line"><span>العنوان</span><b>—</b></div><div class="party-line"><span>تاريخ العرض</span><b>' + dateLabel + '</b></div></div>' +
+    '<div class="party-card"><h3>بيانات العرض</h3><div class="party-line"><span>رقم العرض</span><b class="ltr">' + escapeHtml(q.number) + '</b></div><div class="party-line"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="party-line"><span>ساري حتى</span><b>' + escapeHtml(q.validUntil || '7 أيام من تاريخ الإصدار') + '</b></div><div class="party-line"><span>طريقة الدفع</span><b>نقدًا / تحويل بنكي</b></div></div>',
     '<p class="doc-intro">نشكركم على اهتمامكم بالتعامل معنا، ويسعدنا تقديم عرض السعر التالي.</p><table class="items"><thead><tr><th class="cell-num">م</th><th>كود الصنف</th><th>الصنف / الوصف</th><th class="cell-num">الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
     '<section class="totals-area"><div class="notes-box"><h3>ملاحظات وشروط</h3><p>يرجى مراجعة تفاصيل الأصناف والكميات والأسعار قبل اعتماد العرض.</p><ul><li>الأسعار تشمل التوريد فقط ما لم يُذكر خلاف ذلك.</li><li>مدة التوريد حسب التوفر في المخزون.</li><li>الضمان حسب شروط الشركة المصنعة.</li><li>هذا العرض ساري لمدة 7 أيام من تاريخ الإصدار.</li></ul></div><div class="totals-box"><div class="total-line"><span>إجمالي المبلغ قبل الخصم</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(0) + '</b></div><div class="total-line"><span>إجمالي المبلغ بعد الخصم</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الضريبة (0%)</span><b>' + money(0) + '</b></div><div class="total-line total-grand"><span>المبلغ الإجمالي</span><b>' + money(subtotal) + '</b></div></div></section><div class="terms"><strong>تنويه:</strong> يتم اعتماد الطلب بعد موافقة العميل على الكميات والأسعار وشروط التوريد.</div>' +
     '<section class="signatures"><div>توقيع المشتري</div><div>توقيع وختم المؤسسة</div></section>')
@@ -2480,7 +2558,3 @@ function BrandedLoadingScreen({ caption }: { caption: string }) {
     <div className="loading-track"><span /></div>
   </main>
 }
-
-
-
-
