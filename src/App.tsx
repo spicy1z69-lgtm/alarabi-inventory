@@ -3,18 +3,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { getDesktopLocalSession, isDesktopApp, readDesktopState, writeDesktopState } from './lib/desktopStorage'
+import { getDesktopLocalSession, isDesktopApp, readDesktopState, writeDesktopStateBundle } from './lib/desktopStorage'
+import alarabiLogoDataUrl from './assets/alarabi-logo.jpg?inline'
+import alarabiWatermarkDataUrl from './assets/alarabi-watermark.png?inline'
 
-import * as XLSX from 'xlsx'
 import { supabase } from './lib/supabase'
 import {
-  Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil,
-  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download,
+  Boxes, LayoutDashboard, Package, FileText, Search, Plus, Pencil, Copy,
+  Trash2, AlertTriangle, TrendingUp, X, Printer, Check, ClipboardList, Receipt, CircleDollarSign, Wallet, ArrowDownLeft, ArrowUpRight, Download, CalendarCheck, Upload, RotateCcw, MessageCircle, Users, History, Settings,
 } from 'lucide-react'
 import type { Product, Quote, QuoteItem, Invoice } from './types'
+import { cashDifferenceFor, invoiceGrandTotalFor, invoiceTaxFor, itemsSubtotalFor, lineTotalFor, outstandingBalanceFor, roundMoney, weightedAverageCostFor } from './lib/money'
 
-const COMPANY = 'العربي لأنظمة التأريض والحماية من الصواعق'
-const INVOICE_COMPANY = 'العربي لأنظمة التأريض'
+const COMPANY = 'مؤسسة العربي لأنظمة التأريض'
+const INVOICE_COMPANY = COMPANY
+const COMPANY_ADDRESS = 'وسط البلد · 15 سليمان الحلبي · الجيلي مول · الدور الثاني'
+const CONTACTS = [
+  { name: 'Ahmed Elsaeed', phone: '01094990377' },
+  { name: 'Ali Elyamany', phone: '01064227445' },
+]
+const COMPANY_EMAIL = 'alarabi.company5@gmail.com'
+type CompanySettings = { name: string; address: string; email: string; contact1Name: string; contact1Phone: string; contact2Name: string; contact2Phone: string; logoDataUrl?: string }
+const DEFAULT_COMPANY_SETTINGS: CompanySettings = { name: COMPANY, address: COMPANY_ADDRESS, email: COMPANY_EMAIL, contact1Name: CONTACTS[0].name, contact1Phone: CONTACTS[0].phone, contact2Name: CONTACTS[1].name, contact2Phone: CONTACTS[1].phone }
+type ActivityItem = { id: string; date: string; action: string; reference?: string; detail?: string }
 
 const seed: Product[] = [
   {
@@ -91,6 +102,12 @@ const today = () => {
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
   return local.toISOString().slice(0, 10)
 }
+const addDaysToDate = (date: string, days: number) => {
+  const value = new Date(date + 'T12:00:00')
+  value.setDate(value.getDate() + days)
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 10)
+}
 
 const load = <T,>(key: string, fallback: T): T => {
   try {
@@ -103,9 +120,12 @@ const load = <T,>(key: string, fallback: T): T => {
 
 type SupplierDebtPayment = { id: string; amount: number; date: string; note: string }
 type SupplierDebt = { id: string; supplier: string; phone: string; reference: string; description: string; amount: number; date: string; dueDate: string; payments: SupplierDebtPayment[] }
-type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string; supplierDebtPaymentId?: string }
+type CashEntry = { id: string; kind: 'in' | 'out'; amount: number; category: string; note: string; date: string; invoiceId?: string; supplierDebtPaymentId?: string; purchaseId?: string }
 type StockMovement = { id: string; productId: string; productName: string; kind: 'in' | 'out'; quantity: number; reason: string; reference: string; date: string; quantityBefore?: number; quantityAfter?: number }
-type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'debts' | 'reports'
+type Operations = { purchases: Array<{id:string;date:string;supplier:string;productId:string;productName:string;quantity:number;unitCost:number;paid:number;total:number}>; returns: Array<{id:string;date:string;invoiceId:string;invoiceNumber:string;customer:string;amount:number}>; cashCounts: Array<{id:string;date:string;expected:number;actual:number;difference:number}>; activity?: ActivityItem[]; companySettings?: CompanySettings }
+const emptyOperations = (): Operations => ({ purchases: [], returns: [], cashCounts: [], activity: [], companySettings: DEFAULT_COMPANY_SETTINGS })
+const normalizeOperations = (value?: Partial<Operations>): Operations => ({ ...emptyOperations(), ...(value || {}), purchases: value?.purchases || [], returns: value?.returns || [], cashCounts: value?.cashCounts || [], activity: value?.activity || [], companySettings: { ...DEFAULT_COMPANY_SETTINGS, ...(value?.companySettings || {}) } })
+type Tab = 'dashboard' | 'products' | 'quotes' | 'invoices' | 'cash' | 'debts' | 'reports' | 'customers' | 'activity' | 'settings'
 
 type AppUser = Pick<User, 'id'>
 
@@ -160,9 +180,13 @@ function InventoryApp({ user }: { user: AppUser }) {
   }
   const [reportFrom, setReportFrom] = useState('')
   const [reportTo, setReportTo] = useState('')
+  const [quoteFrom, setQuoteFrom] = useState('')
+  const [quoteTo, setQuoteTo] = useState('')
   const [reportKind, setReportKind] = useState<'sales' | 'cash' | 'inventory'>('sales')
   const [cloudLoaded, setCloudLoaded] = useState(false)
   const [cloudError, setCloudError] = useState('')
+  const [localSaveStatus, setLocalSaveStatus] = useState<'saving' | 'saved' | 'error'>('saving')
+  const localSaveRevision = useRef(0)
   const [products, setProducts] = useState<Product[]>(() =>
     []
   )
@@ -183,15 +207,36 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [debtPaymentAmount, setDebtPaymentAmount] = useState('')
   const [debtPaymentNote, setDebtPaymentNote] = useState('')
   const [debtSearch, setDebtSearch] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
   const supplierPaymentLock = useRef(false)
   useEffect(() => { if (!payingDebtId) supplierPaymentLock.current = false }, [payingDebtId])
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => [])
+  const [operations, setOperations] = useState<Operations>(() => emptyOperations())
+  const [companySettings, setCompanySettings] = useState<CompanySettings>(() => DEFAULT_COMPANY_SETTINGS)
+  const [savedDrafts, setSavedDrafts] = useState<{ invoice?: { customer: string; phone: string; dueDate: string; discount: string; tax: string; paid: string; notes: string; rows: QuoteItem[] }; quote?: { customer: string; phone: string; followUpDate: string; rows: QuoteItem[] } }>(() => load('alarabi-form-drafts-' + user.id, {}))
+  const [purchaseSupplier, setPurchaseSupplier] = useState('')
+  const [purchaseProductId, setPurchaseProductId] = useState('')
+  const [purchaseQuantity, setPurchaseQuantity] = useState('')
+  const [purchaseCost, setPurchaseCost] = useState('')
+  const [purchasePaid, setPurchasePaid] = useState('')
+  const [cashCountActual, setCashCountActual] = useState('')
+  const desktopStateRef = useRef<Array<{ key: string; value: unknown }>>([])
+  desktopStateRef.current = [
+    { key: 'products', value: products },
+    { key: 'quotes', value: quotes },
+    { key: 'invoices', value: invoices },
+    { key: 'cash', value: cashEntries },
+    { key: 'supplier-debts', value: supplierDebts },
+    { key: 'stock-movements', value: stockMovements },
+    { key: 'operations', value: operations },
+  ]
   const [cashModal, setCashModal] = useState(false)
   const [cashKind, setCashKind] = useState<'in' | 'out'>('in')
   const [cashAmount, setCashAmount] = useState('')
   const [cashCategory, setCashCategory] = useState('')
   const [cashNote, setCashNote] = useState('')
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [convertingQuoteId, setConvertingQuoteId] = useState<string | null>(null)
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [invoiceCustomer, setInvoiceCustomer] = useState('')
@@ -209,7 +254,14 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [productModal, setProductModal] = useState<Product | null | 'new'>(null)
   const [quoteModal, setQuoteModal] = useState(false)
   const [notice, setNotice] = useState('')
+  useEffect(() => {
+    if (!notice) return
+    const timeout = window.setTimeout(() => setNotice(''), 4000)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
   const [customer, setCustomer] = useState('')
+  const [quotePhone, setQuotePhone] = useState('')
+  const [quoteFollowUpDate, setQuoteFollowUpDate] = useState('')
   const [quoteRows, setQuoteRows] = useState<QuoteItem[]>([])
   const [draft, setDraft] = useState({
     code: '',
@@ -219,8 +271,11 @@ function InventoryApp({ user }: { user: AppUser }) {
     price: '0',
     costPrice: '0',
     minStock: '2',
+    targetStock: '10',
   })
   const [stockMovementModal, setStockMovementModal] = useState(false)
+  const [stocktakeOpen, setStocktakeOpen] = useState(false)
+  const [stocktakeCounts, setStocktakeCounts] = useState<Record<string, string>>({})
   const [movementProductId, setMovementProductId] = useState('')
   const [movementKind, setMovementKind] = useState<'in' | 'out'>('in')
   const [movementQuantity, setMovementQuantity] = useState('')
@@ -229,6 +284,20 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [movementKindFilter, setMovementKindFilter] = useState<'all' | 'in' | 'out'>('all')
   const [movementFromDate, setMovementFromDate] = useState('')
   const [movementToDate, setMovementToDate] = useState('')
+
+  useEffect(() => {
+    localStorage.setItem('alarabi-form-drafts-' + user.id, JSON.stringify(savedDrafts))
+  }, [savedDrafts, user.id])
+  useEffect(() => {
+    if (!cloudLoaded) return
+    setOperations(old => old.companySettings === companySettings ? old : { ...old, companySettings })
+  }, [companySettings, cloudLoaded])
+  useEffect(() => {
+    if (invoiceModal) setSavedDrafts(old => ({ ...old, invoice: { customer: invoiceCustomer, phone: invoicePhone, dueDate: invoiceDueDate, discount: invoiceDiscount, tax: invoiceTax, paid: invoicePaid, notes: invoiceNotes, rows: quoteRows } }))
+  }, [invoiceModal, invoiceCustomer, invoicePhone, invoiceDueDate, invoiceDiscount, invoiceTax, invoicePaid, invoiceNotes, quoteRows])
+  useEffect(() => {
+    if (quoteModal) setSavedDrafts(old => ({ ...old, quote: { customer, phone: quotePhone, followUpDate: quoteFollowUpDate, rows: quoteRows } }))
+  }, [quoteModal, customer, quotePhone, quoteFollowUpDate, quoteRows])
 
   useEffect(() => {
     let active = true
@@ -245,6 +314,9 @@ function InventoryApp({ user }: { user: AppUser }) {
           setCashEntries((localValues.get('cash') as CashEntry[] | undefined) ?? [])
           setSupplierDebts((localValues.get('supplier-debts') as SupplierDebt[] | undefined) ?? [])
           setStockMovements((localValues.get('stock-movements') as StockMovement[] | undefined) ?? [])
+          const loadedOperations = normalizeOperations(localValues.get('operations') as Operations | undefined)
+          setOperations(loadedOperations)
+          setCompanySettings(loadedOperations.companySettings || DEFAULT_COMPANY_SETTINGS)
           setCloudLoaded(true)
         } catch {
           if (active) setCloudError('تعذر تحميل البيانات المحلية. لم يتم استبدال البيانات أو إنشاء بيانات افتراضية.')
@@ -266,6 +338,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         { key: 'cash', localKey: 'alarabi-cash', fallback: isOwnerAccount ? load('alarabi-cash', []) : [] as CashEntry[], setter: setCashEntries },
         { key: 'supplier-debts', localKey: 'alarabi-supplier-debts', fallback: isOwnerAccount ? load('alarabi-supplier-debts', []) : [] as SupplierDebt[], setter: setSupplierDebts },
         { key: 'stock-movements', localKey: 'alarabi-stock-movements', fallback: isOwnerAccount ? load('alarabi-stock-movements', []) : [] as StockMovement[], setter: setStockMovements },
+        { key: 'operations', localKey: 'alarabi-operations', fallback: isOwnerAccount ? load('alarabi-operations', emptyOperations()) : emptyOperations(), setter: (value: Operations) => { const normalized = normalizeOperations(value); setOperations(normalized); setCompanySettings(normalized.companySettings || DEFAULT_COMPANY_SETTINGS) } },
       ] as const
       for (const record of records) {
         const cloudValue = values.get(record.key)
@@ -289,47 +362,35 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) {
-      void writeDesktopState('products', products).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
-      return
-    }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-products', JSON.stringify(products))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'products', state_value: products, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الأصناف سحابيًا: ' + error.message) })
   }, [products, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) {
-      void writeDesktopState('quotes', quotes).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
-      return
-    }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-quotes', JSON.stringify(quotes))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'quotes', state_value: quotes, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ عروض الأسعار سحابيًا: ' + error.message) })
   }, [quotes, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) {
-      void writeDesktopState('invoices', invoices).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
-      return
-    }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-invoices', JSON.stringify(invoices))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'invoices', state_value: invoices, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ الفواتير سحابيًا: ' + error.message) })
   }, [invoices, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) {
-      void writeDesktopState('cash', cashEntries).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
-      return
-    }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-cash', JSON.stringify(cashEntries))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'cash', state_value: cashEntries, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ حركة الخزنة سحابيًا: ' + error.message) })
   }, [cashEntries, cloudLoaded, user.id])
 
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) { void writeDesktopState('supplier-debts', supplierDebts).catch(() => setCloudError('تعذر حفظ ديون الموردين محليًا.')); return }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-supplier-debts', JSON.stringify(supplierDebts))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'supplier-debts', state_value: supplierDebts, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ ديون الموردين: ' + error.message) })
   }, [supplierDebts, cloudLoaded, user.id])
@@ -339,20 +400,22 @@ function InventoryApp({ user }: { user: AppUser }) {
   const filteredSupplierDebts = supplierDebts.filter(debt => (debt.supplier + ' ' + debt.phone + ' ' + debt.reference + ' ' + debt.description).toLowerCase().includes(debtSearch.trim().toLowerCase()))
   const overdueSupplierDebts = supplierDebts.filter(debt => debtRemaining(debt) > 0 && debt.dueDate && debt.dueDate < today())
   const addSupplierDebt = () => {
-    const amount = Number(debtAmount)
+    const amount = roundMoney(Number(debtAmount))
     if (!debtSupplier.trim() || !Number.isFinite(amount) || amount <= 0 || !debtDate || !debtDueDate) { setNotice('اكتب اسم المورد والمبلغ وتاريخ الدين وموعد السداد بشكل صحيح'); return }
     setSupplierDebts(old => [{ id: crypto.randomUUID(), supplier: debtSupplier.trim(), phone: debtPhone.trim(), reference: debtReference.trim(), description: debtDescription.trim(), amount, date: debtDate, dueDate: debtDueDate, payments: [] }, ...old])
+    logActivity('تسجيل دين مورد', debtSupplier.trim(), money(amount))
     setDebtSupplier(''); setDebtPhone(''); setDebtReference(''); setDebtDescription(''); setDebtAmount(''); setDebtDate(today()); setDebtDueDate('')
     setNotice('تم تسجيل دين المورد وحفظه في السجل')
   }
   const recordSupplierDebtPayment = () => {
     if (supplierPaymentLock.current) return
-    const debt = supplierDebts.find(item => item.id === payingDebtId); const amount = Number(debtPaymentAmount)
+    const debt = supplierDebts.find(item => item.id === payingDebtId); const amount = roundMoney(Number(debtPaymentAmount))
     if (!debt || !Number.isFinite(amount) || amount <= 0 || amount > debtRemaining(debt)) { setNotice('اكتب مبلغ سداد صحيح لا يتجاوز المتبقي'); return }
     supplierPaymentLock.current = true
     const paymentId = crypto.randomUUID(); const payment = { id: paymentId, amount, date: today(), note: debtPaymentNote.trim() }
     setSupplierDebts(old => old.map(item => item.id === debt.id ? { ...item, payments: [...(item.payments || []), payment] } : item))
     setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount, category: 'سداد دين مورد', note: `${debt.supplier}${debt.reference ? ' — ' + debt.reference : ''}${debtPaymentNote.trim() ? ' — ' + debtPaymentNote.trim() : ''}`, date: today(), supplierDebtPaymentId: paymentId }, ...old])
+    logActivity('سداد دين مورد', debt.supplier, money(amount))
     setPayingDebtId(''); setDebtPaymentAmount(''); setDebtPaymentNote(''); setNotice('تم تسجيل السداد مرة واحدة وربطه بالخزنة ودين المورد')
   }
   const printSupplierDebtStatement = (debt: SupplierDebt) => {
@@ -365,14 +428,15 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   const cashIn = cashEntries.filter(e => e.kind === 'in').reduce((s, e) => s + e.amount, 0)
   const cashOut = cashEntries.filter(e => e.kind === 'out').reduce((s, e) => s + e.amount, 0)
-  const cashBalance = cashIn - cashOut
+  const cashBalance = roundMoney(cashIn - cashOut)
+  const expenseTotal = roundMoney(cashEntries.filter(entry => entry.kind === 'out' && !entry.supplierDebtPaymentId && entry.category !== 'شراء بضاعة' && entry.category !== 'رد قيمة مرتجع').reduce((sum, entry) => sum + entry.amount, 0))
 
   const exportBackup = () => {
     const backup = {
-      company: COMPANY,
+      company: companySettings.name,
       exportedAt: new Date().toISOString(),
       version: 1,
-      data: { products, quotes, invoices, cashEntries, stockMovements, supplierDebts },
+      data: { products, quotes, invoices, cashEntries, stockMovements, supplierDebts, operations },
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -384,6 +448,63 @@ function InventoryApp({ user }: { user: AppUser }) {
     link.remove()
     URL.revokeObjectURL(url)
     setNotice('تم تجهيز نسخة احتياطية من البيانات الحالية')
+  }
+  const exportEndOfDay = () => {
+    const date = today()
+    const dailyInvoices = invoices.filter(invoice => invoice.date === date)
+    const dailyQuotes = quotes.filter(quote => quote.date === date)
+    const dailyCash = cashEntries.filter(entry => entry.date === date)
+    const dailyStockMovements = stockMovements.filter(movement => movement.date === date)
+    const dailySupplierDebts = supplierDebts
+      .map(debt => ({ ...debt, payments: (debt.payments || []).filter(payment => payment.date === date) }))
+      .filter(debt => debt.date === date || debt.payments.length > 0)
+    const cashIn = dailyCash.filter(entry => entry.kind === 'in').reduce((sum, entry) => sum + entry.amount, 0)
+    const cashOut = dailyCash.filter(entry => entry.kind === 'out').reduce((sum, entry) => sum + entry.amount, 0)
+    const openingCash = cashEntries.filter(entry => entry.date < date).reduce((sum, entry) => sum + (entry.kind === 'in' ? entry.amount : -entry.amount), 0)
+    const bundle = {
+      application: 'alarabisystem',
+      company: companySettings.name,
+      kind: 'end-of-day',
+      date,
+      closedAt: new Date().toISOString(),
+      summary: {
+        invoiceCount: dailyInvoices.length,
+        invoiceTotal: dailyInvoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0),
+        quoteCount: dailyQuotes.length,
+        cashIn,
+        cashOut,
+        cashNet: cashIn - cashOut,
+        openingCash,
+        closingCash: openingCash + cashIn - cashOut,
+        inventoryUnits: products.reduce((sum, product) => sum + product.quantity, 0),
+        inventoryCostValue: products.reduce((sum, product) => sum + product.quantity * (product.costPrice ?? 0), 0),
+        stockMovementCount: dailyStockMovements.length,
+        supplierDebtCount: dailySupplierDebts.length,
+      },
+      data: {
+        invoices: dailyInvoices,
+        quotes: dailyQuotes,
+        cashEntries: dailyCash,
+        stockMovements: dailyStockMovements,
+        supplierDebts: dailySupplierDebts,
+        operations: {
+          purchases: operations.purchases.filter(item => item.date === date),
+          returns: operations.returns.filter(item => item.date === date),
+          cashCounts: operations.cashCounts.filter(item => item.date === date),
+        },
+        stockSnapshot: products,
+      },
+    }
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'alarabisystem-end-of-day-' + date + '.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    setNotice('تم إنهاء اليوم وحفظ ملف بيانات يوم ' + date)
   }
   const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -398,12 +519,14 @@ function InventoryApp({ user }: { user: AppUser }) {
         !Array.isArray(data.invoices) ||
         !Array.isArray(data.cashEntries) ||
         (data.stockMovements !== undefined && !Array.isArray(data.stockMovements)) ||
-        (data.supplierDebts !== undefined && !Array.isArray(data.supplierDebts))
+        (data.supplierDebts !== undefined && !Array.isArray(data.supplierDebts)) ||
+        (data.operations !== undefined && (!data.operations || !Array.isArray(data.operations.purchases) || !Array.isArray(data.operations.returns) || !Array.isArray(data.operations.cashCounts)))
       ) {
         setNotice('ملف النسخة الاحتياطية غير صالح أو ناقص')
         return
       }
-      const confirmed = window.confirm('تنبيه: استرجاع النسخة سيستبدل بيانات الأصناف وعروض الأسعار والفواتير والخزنة وحركات المخزون الحالية. هل حفظت نسخة من البيانات الحالية وتريد المتابعة؟')
+      const preview = `محتويات الملف: ${data.products.length} صنف، ${data.invoices.length} فاتورة، ${data.quotes.length} عرض سعر، ${data.cashEntries.length} حركة خزنة.\n\nسيستبدل هذا بيانات البرنامج الحالية. هل تريد المتابعة؟`
+      const confirmed = window.confirm(preview)
       if (!confirmed) return
       setProducts(data.products)
       setQuotes(data.quotes)
@@ -411,6 +534,9 @@ function InventoryApp({ user }: { user: AppUser }) {
       setCashEntries(data.cashEntries)
       setStockMovements(Array.isArray(data.stockMovements) ? data.stockMovements : [])
       setSupplierDebts(Array.isArray(data.supplierDebts) ? data.supplierDebts : [])
+      const restoredOperations = normalizeOperations(data.operations)
+      setOperations(restoredOperations)
+      setCompanySettings(restoredOperations.companySettings || DEFAULT_COMPANY_SETTINGS)
       setNotice('تم تحميل النسخة الاحتياطية. جاري حفظ البيانات')
     } catch {
       setNotice('تعذر قراءة الملف. تأكد أنه ملف نسخة احتياطية صحيح بصيغة JSON')
@@ -419,11 +545,17 @@ function InventoryApp({ user }: { user: AppUser }) {
     }
   }
 
+  const logActivity = (action: string, reference = '', detail = '') => {
+    const item: ActivityItem = { id: crypto.randomUUID(), date: new Date().toISOString(), action, reference, detail }
+    setOperations(old => ({ ...old, activity: [item, ...(old.activity || [])].slice(0, 500) }))
+  }
+
   const addCashEntry = () => {
-    const amount = Number(cashAmount)
+    const amount = roundMoney(Number(cashAmount))
     if (!Number.isFinite(amount) || amount <= 0 || !cashCategory.trim()) { setNotice('اكتب مبلغ صحيح وحدد البند'); return }
     setCashEntries(old => [{ id: crypto.randomUUID(), kind: cashKind, amount, category: cashCategory.trim(), note: cashNote.trim(), date: today() }, ...old])
     setCashAmount(''); setCashCategory(''); setCashNote(''); setCashModal(false)
+    logActivity(cashKind === 'in' ? 'تسجيل مبلغ داخل' : 'تسجيل مصروف', cashCategory.trim(), money(amount))
     setNotice(cashKind === 'in' ? 'تم تسجيل المبلغ الداخل' : 'تم تسجيل المبلغ الخارج')
   }
   const deleteCashEntry = (entry: CashEntry) => {
@@ -431,15 +563,71 @@ function InventoryApp({ user }: { user: AppUser }) {
     setCashEntries(old => old.filter(e => e.id !== entry.id))
   }
 
+  const restoreSavedDraft = (kind: 'invoice' | 'quote') => {
+    if (kind === 'quote' && savedDrafts.quote) {
+      setCustomer(savedDrafts.quote.customer); setQuotePhone(savedDrafts.quote.phone); setQuoteFollowUpDate(savedDrafts.quote.followUpDate); setQuoteRows(savedDrafts.quote.rows); setQuoteModal(true); setTab('quotes')
+    } else if (kind === 'invoice' && savedDrafts.invoice) {
+      const draftInvoice = savedDrafts.invoice
+      setInvoiceCustomer(draftInvoice.customer); setInvoicePhone(draftInvoice.phone); setInvoiceDueDate(draftInvoice.dueDate); setInvoiceDiscount(draftInvoice.discount); setInvoiceTax(draftInvoice.tax); setInvoicePaid(draftInvoice.paid); setInvoiceNotes(draftInvoice.notes); setInvoiceStatus(Number(draftInvoice.paid) > 0 ? 'partial' : 'unpaid'); setQuoteRows(draftInvoice.rows); setInvoiceModal(true); setTab('invoices')
+    }
+  }
+
+  const printReorderList = () => {
+    const rows = reorderSuggestions.map(item => `<tr><td>${escapeHtml(item.product.code)}</td><td>${escapeHtml(item.product.name)}</td><td>${item.product.quantity}</td><td>${item.product.minStock}</td><td>${item.daysLeft === null ? '—' : item.daysLeft + ' يوم'}</td><td>${item.buyQuantity}</td></tr>`).join('')
+    const html = `<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>قائمة شراء مقترحة</title><style>body{font:14px Tahoma;padding:24px;color:#222}h1{border-right:5px solid #ed5a20;padding-right:12px}table{border-collapse:collapse;width:100%;margin-top:20px}td,th{border:1px solid #bbb;padding:9px;text-align:right}th{background:#17191d;color:#fff}@page{size:A4 landscape;margin:12mm}</style><h1>قائمة شراء مقترحة — ${escapeHtml(companySettings.name)}</h1><p>التاريخ: ${today()} · الأصناف تحتاج مراجعة الكميات قبل طلبها.</p><table><thead><tr><th>الكود</th><th>الصنف</th><th>المتاح</th><th>حد التنبيه</th><th>النفاد المتوقع</th><th>كمية الشراء المقترحة</th></tr></thead><tbody>${rows || '<tr><td colspan="6">لا توجد أصناف مقترحة للشراء</td></tr>'}</tbody></table><script>window.onload=()=>window.print()</script></html>`
+    printDocument(html, 'قائمة الشراء')
+  }
+
+  const updateCompanyField = (key: keyof CompanySettings, value: string) => setCompanySettings(old => ({ ...old, [key]: value }))
+  const importCompanyLogo = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('اختر صورة PNG أو JPG أو WebP أصغر من 5 ميجابايت')
+      const logoDataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('تعذر قراءة الصورة')); reader.onerror = () => reject(new Error('تعذر قراءة الصورة')); reader.readAsDataURL(file) })
+      setCompanySettings(old => ({ ...old, logoDataUrl }))
+      logActivity('تغيير شعار الشركة', file.name)
+      setNotice('تم حفظ شعار الشركة الجديد')
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'تعذر حفظ الشعار') }
+    finally { event.target.value = '' }
+  }
+
   useEffect(() => {
     if (!cloudLoaded) return
-    if (isDesktopApp()) {
-      void writeDesktopState('stock-movements', stockMovements).catch(() => setCloudError('تعذر حفظ البيانات محليًا.'))
-      return
-    }
+    if (isDesktopApp()) return
     if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-stock-movements', JSON.stringify(stockMovements))
     void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'stock-movements', state_value: stockMovements, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل حركة المخزون: ' + error.message) })
   }, [stockMovements, cloudLoaded, user.id])
+
+  useEffect(() => {
+    if (!cloudLoaded || isDesktopApp()) return
+    if (user.id === '9301075f-da3f-438e-acb6-43fd0af65a41') localStorage.setItem('alarabi-operations', JSON.stringify(operations))
+    void supabase.from('app_state').upsert({ owner_id: user.id, state_key: 'operations', state_value: operations, updated_at: new Date().toISOString() }, { onConflict: 'owner_id,state_key' }).then(({ error }) => { if (error) setCloudError('مشكلة في حفظ سجل العمليات: ' + error.message) })
+  }, [operations, cloudLoaded, user.id])
+
+  useEffect(() => {
+    if (!cloudLoaded || !isDesktopApp()) return
+    const revision = ++localSaveRevision.current
+    setLocalSaveStatus('saving')
+    void writeDesktopStateBundle(desktopStateRef.current).then(() => {
+      if (revision === localSaveRevision.current) setLocalSaveStatus('saved')
+    }).catch(error => {
+      if (revision === localSaveRevision.current) {
+        setLocalSaveStatus('error')
+        setCloudError('تعذر حفظ مجموعة بيانات المحل كاملة محليًا: ' + (error instanceof Error ? error.message : 'خطأ غير متوقع'))
+      }
+    })
+  }, [products, quotes, invoices, cashEntries, supplierDebts, stockMovements, operations, cloudLoaded])
+
+  useEffect(() => {
+    if (!cloudLoaded || !isDesktopApp()) return
+    const flushLatestState = () => {
+      const result = window.alarabiDesktop!.writeStateBundleSync(desktopStateRef.current)
+      if (!result.ok) console.error('تعذر حفظ آخر تغييرات المحل قبل الإغلاق:', result.error)
+    }
+    window.addEventListener('beforeunload', flushLatestState)
+    return () => window.removeEventListener('beforeunload', flushLatestState)
+  }, [cloudLoaded])
 
   const inventoryValue = products.reduce(
     (sum, p) => sum + p.quantity * p.price,
@@ -447,32 +635,73 @@ function InventoryApp({ user }: { user: AppUser }) {
   )
 
   const lowStock = products.filter(p => p.quantity <= p.minStock)
-  const reportInvoices = invoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
+  const activeInvoices = invoices.filter(invoice => !(invoice as Invoice & { returned?: boolean }).returned)
+  const recentSales = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() - (6 - index))
+    const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`
+    return { date: key, label: date.toLocaleDateString('ar-EG', { weekday: 'short' }), total: roundMoney(activeInvoices.filter(invoice => invoice.date === key).reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)) }
+  })
+  const bestSellingProducts = activeInvoices.flatMap(invoice => invoice.items || []).reduce((totals, item) => { totals.set(item.productId, (totals.get(item.productId) || 0) + item.quantity); return totals }, new Map<string, number>())
+  const topProducts = [...bestSellingProducts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,quantity])=>({name: products.find(p=>p.id===id)?.name || activeInvoices.flatMap(i=>i.items||[]).find(item=>item.productId===id)?.name || 'صنف محذوف', quantity}))
+  const maxDailySales = Math.max(1, ...recentSales.map(day=>day.total))
+  const reportInvoices = activeInvoices.filter(i => (!reportFrom || i.date >= reportFrom) && (!reportTo || i.date <= reportTo))
   const reportCash = cashEntries.filter(e => (!reportFrom || e.date >= reportFrom) && (!reportTo || e.date <= reportTo))
   const reportSales = reportInvoices.reduce((sum, i) => sum + invoiceTotalFor(i), 0)
   const reportCollected = reportInvoices.reduce((sum, i) => sum + Math.min(invoiceTotalFor(i), Math.max(0, i.paidAmount || 0)), 0)
-  const reportBalance = reportInvoices.reduce((sum, i) => sum + Math.max(0, invoiceTotalFor(i) - (i.paidAmount || 0)), 0)
+  const reportBalance = reportInvoices.reduce((sum, i) => sum + outstandingBalanceFor(invoiceTotalFor(i), i.paidAmount || 0), 0)
   const reportCashIn = reportCash.filter(e => e.kind === 'in').reduce((sum, e) => sum + e.amount, 0)
   const reportCashOut = reportCash.filter(e => e.kind === 'out').reduce((sum, e) => sum + e.amount, 0)
-  const totalInvoiceSales = invoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
-  const totalCollected = invoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
-  const customerBalances = Math.max(0, totalInvoiceSales - totalCollected)
-  const unpaidInvoices = invoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
-  const paidInvoiceCount = invoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
+  const totalInvoiceSales = activeInvoices.reduce((sum, invoice) => sum + invoiceTotalFor(invoice), 0)
+  const totalCollected = activeInvoices.reduce((sum, invoice) => sum + Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0)), 0)
+  const customerBalances = activeInvoices.reduce((sum, invoice) => sum + outstandingBalanceFor(invoiceTotalFor(invoice), invoice.paidAmount || 0), 0)
+  const unpaidInvoices = activeInvoices.filter(invoice => invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
+  const paidInvoiceCount = activeInvoices.filter(invoice => invoiceTotalFor(invoice) <= (invoice.paidAmount || 0)).length
   // Only use cost snapshots stored on invoice lines. Falling back to today's
   // product cost would rewrite historical margins whenever a product is edited.
-  const costCompleteInvoices = invoices.filter(invoice =>
+  const costCompleteInvoices = activeInvoices.filter(invoice =>
     (invoice.items || []).every(item => typeof item.costPrice === 'number' && item.costPrice > 0)
   )
   const knownCostSales = costCompleteInvoices.reduce((sum, invoice) =>
     sum + invoice.items.reduce((itemSum, item) => itemSum + item.quantity * (item.costPrice ?? 0), 0), 0)
-  const hasMissingCosts = costCompleteInvoices.length !== invoices.length
+  const hasMissingCosts = costCompleteInvoices.length !== activeInvoices.length
   const knownSalesBeforeTax = costCompleteInvoices.reduce((sum, invoice) => {
-    const subtotal = invoice.items.reduce((itemSum, item) => itemSum + item.quantity * item.price, 0)
+    const subtotal = itemsSubtotalFor(invoice.items)
     const discount = Math.min(subtotal, Math.max(0, invoice.discount || 0))
     return sum + Math.max(0, subtotal - discount)
   }, 0)
   const estimatedGrossProfit = knownSalesBeforeTax - knownCostSales
+  const knownNetProfit = roundMoney(estimatedGrossProfit - expenseTotal)
+  const estimatedProfitMargin = knownSalesBeforeTax > 0 ? roundMoney(knownNetProfit / knownSalesBeforeTax * 100) : 0
+  const activeOverdueQuotes = quotes.filter(quote => quote.status !== 'declined' && quote.status !== 'accepted' && quote.status !== 'expired' && quote.followUpDate && quote.followUpDate <= today() && !invoices.some(invoice => invoice.quoteId === quote.id || invoice.id === quote.convertedInvoiceId))
+  const expiredQuotes = quotes.filter(quote => (quote.status === 'expired' || (quote.validUntil || addDaysToDate(quote.date, 7)) < today()) && !invoices.some(invoice => invoice.quoteId === quote.id || invoice.id === quote.convertedInvoiceId) && quote.status !== 'declined')
+  const dueCustomerInvoices = activeInvoices.filter(invoice => invoice.dueDate && invoice.dueDate < today() && invoiceTotalFor(invoice) > (invoice.paidAmount || 0))
+  const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+  const salesStart = new Date(thirtyDaysAgo.getTime() - thirtyDaysAgo.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+  const salesLast30Days = activeInvoices.filter(invoice => invoice.date >= salesStart && invoice.date <= today())
+  const stockForecasts = products.map(product => {
+    const unitsSold = salesLast30Days.reduce((sum, invoice) => sum + (invoice.items || []).filter(row => row.productId === product.id).reduce((qty, row) => qty + row.quantity, 0), 0)
+    const dailyRate = unitsSold / 30
+    return { product, unitsSold, dailyRate, daysLeft: dailyRate > 0 ? Math.floor(product.quantity / dailyRate) : null, buyQuantity: Math.max(0, (product.targetStock ?? Math.max(product.minStock + 1, product.minStock * 3)) - product.quantity) }
+  })
+  const reorderSuggestions = stockForecasts.filter(item => item.product.quantity <= item.product.minStock || (item.daysLeft !== null && item.daysLeft <= 14))
+  const customerSummaries = Array.from(activeInvoices.reduce((map, invoice) => {
+    const key = invoice.customer.trim().toLocaleLowerCase()
+    const current = map.get(key) || { name: invoice.customer, invoices: 0, sales: 0, paid: 0, balance: 0, phone: invoice.phone || '' }
+    current.invoices += 1
+    current.sales += invoiceTotalFor(invoice)
+    current.paid += Math.min(invoiceTotalFor(invoice), Math.max(0, invoice.paidAmount || 0))
+    current.balance += outstandingBalanceFor(invoiceTotalFor(invoice), invoice.paidAmount || 0)
+    if (!current.phone && invoice.phone) current.phone = invoice.phone
+    map.set(key, current)
+    return map
+  }, new Map<string, { name: string; invoices: number; sales: number; paid: number; balance: number; phone: string }>()).values()).sort((a, b) => b.balance - a.balance)
+  const recentActivity: ActivityItem[] = [
+    ...(operations.activity || []),
+    ...activeInvoices.filter(invoice => !(operations.activity || []).some(item => item.reference === invoice.number)).map(invoice => ({ id: 'invoice-' + invoice.id, date: invoice.date, action: 'فاتورة بيع', reference: invoice.number, detail: invoice.customer })),
+    ...quotes.filter(quote => !(operations.activity || []).some(item => item.reference === quote.number)).map(quote => ({ id: 'quote-' + quote.id, date: quote.date, action: 'عرض سعر', reference: quote.number, detail: quote.customer })),
+    ...cashEntries.filter(entry => !(operations.activity || []).some(item => item.reference === entry.category && item.detail === money(entry.amount) && item.date.slice(0, 10) === entry.date)).map(entry => ({ id: 'cash-' + entry.id, date: entry.date, action: entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج', reference: entry.category, detail: money(entry.amount) })),
+    ...stockMovements.map(movement => ({ id: 'movement-' + movement.id, date: movement.date.slice(0, 10), action: 'حركة مخزون', reference: movement.reason, detail: movement.productName + ' · ' + movement.quantity })),
+  ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 100)
 
   const quickSearchResults = useMemo(() => {
     const term = quickSearchQuery.trim().toLocaleLowerCase()
@@ -504,8 +733,10 @@ function InventoryApp({ user }: { user: AppUser }) {
         results.push({ type: 'products', id: movement.id, title: movement.productName, subtitle: 'حركة مخزون · ' + movement.reference + ' · ' + movement.date })
       }
     }
+    for (const debt of supplierDebts) if ((debt.supplier + ' ' + debt.phone + ' ' + debt.reference).toLocaleLowerCase().includes(term)) results.push({ type: 'debts', id: debt.id, title: debt.supplier, subtitle: 'مورد · ' + debt.reference + ' · متبقي ' + money(debtRemaining(debt)) })
+    for (const customer of customerSummaries) if ((customer.name + ' ' + customer.phone).toLocaleLowerCase().includes(term)) results.push({ type: 'customers', id: customer.name, title: customer.name, subtitle: customer.phone + ' · متبقي ' + money(customer.balance) })
     return results.slice(0, 30)
-  }, [quickSearchQuery, products, invoices, quotes, cashEntries, stockMovements])
+  }, [quickSearchQuery, products, invoices, quotes, cashEntries, stockMovements, supplierDebts, customerSummaries])
 
   useEffect(() => {
     const openQuickSearch = () => {
@@ -513,7 +744,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       setQuickSearchOpen(true)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'k' || event.code === 'KeyK')) {
         event.preventDefault()
         openQuickSearch()
       }
@@ -536,9 +767,11 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   const filteredQuotes = useMemo(() => {
     const term = archiveQuery.trim().toLocaleLowerCase()
-    if (!term) return quotes
-    return quotes.filter(quote => (quote.number + ' ' + quote.customer + ' ' + quote.date + ' ' + quote.items.map(item => item.name + ' ' + item.code).join(' ')).toLocaleLowerCase().includes(term))
-  }, [quotes, archiveQuery])
+    return quotes.filter(quote => {
+      const matchesTerm = !term || (quote.number + ' ' + quote.customer + ' ' + quote.date + ' ' + quote.items.map(item => item.name + ' ' + item.code).join(' ')).toLocaleLowerCase().includes(term)
+      return matchesTerm && (!quoteFrom || quote.date >= quoteFrom) && (!quoteTo || quote.date <= quoteTo)
+    })
+  }, [quotes, archiveQuery, quoteFrom, quoteTo])
 
   const filteredCashEntries = useMemo(() => {
     const term = archiveQuery.trim().toLocaleLowerCase()
@@ -567,6 +800,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             price: String(p.price),
             costPrice: String(p.costPrice ?? 0),
             minStock: String(p.minStock),
+            targetStock: String(p.targetStock ?? Math.max(p.minStock + 1, p.minStock * 3)),
           }
         : {
             code: '',
@@ -576,6 +810,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             price: '0',
             costPrice: '0',
             minStock: '2',
+            targetStock: '10',
           }
     )
     setProductModal(p ?? 'new')
@@ -594,6 +829,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       { label: 'سعر البيع', value: draft.price },
       { label: 'سعر التكلفة', value: draft.costPrice },
       { label: 'حد التنبيه', value: draft.minStock },
+      { label: 'المخزون المستهدف', value: draft.targetStock },
     ]
     for (const field of numericFields) {
       const value = Number(field.value)
@@ -601,6 +837,10 @@ function InventoryApp({ user }: { user: AppUser }) {
         setNotice(field.label + ' لازم يكون رقم صحيح أو صفر فأكثر')
         return
       }
+    }
+    if (Number(draft.targetStock) < Number(draft.minStock)) {
+      setNotice('المخزون المستهدف لازم يكون مساويًا لحد التنبيه أو أكبر منه')
+      return
     }
 
     const editingId = productModal !== 'new' && productModal ? productModal.id : null
@@ -622,9 +862,10 @@ function InventoryApp({ user }: { user: AppUser }) {
       name,
       category: draft.category.trim() || 'عام',
       quantity: Number(draft.quantity),
-      price: Number(draft.price),
-      costPrice: Number(draft.costPrice),
+      price: roundMoney(Number(draft.price)),
+      costPrice: roundMoney(Number(draft.costPrice)),
       minStock: Number(draft.minStock),
+      targetStock: Number(draft.targetStock),
     }
 
     setProducts(old =>
@@ -633,6 +874,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         : [item, ...old]
     )
 
+    logActivity(editingId ? 'تعديل صنف' : 'إضافة صنف', item.code, item.name)
     setProductModal(null)
     setNotice('تم حفظ الصنف')
   }
@@ -645,6 +887,38 @@ function InventoryApp({ user }: { user: AppUser }) {
     setMovementReason('')
     setMovementReference('')
     setStockMovementModal(true)
+  }
+
+  const beginStocktake = () => {
+    setStocktakeCounts(Object.fromEntries(products.map(product => [product.id, String(product.quantity)])))
+    setStocktakeOpen(true)
+  }
+
+  const saveStocktake = () => {
+    const changes = products.map(product => {
+      const raw = stocktakeCounts[product.id]
+      const count = Number(raw)
+      return { product, count }
+    })
+    if (changes.some(({ count }) => !Number.isInteger(count) || count < 0)) {
+      setNotice('أدخل كميات جرد صحيحة كأعداد صحيحة موجبة أو صفر')
+      return
+    }
+    const changed = changes.filter(({ product, count }) => count !== product.quantity)
+    if (!changed.length) { setStocktakeOpen(false); setNotice('الجرد مطابق للكميات المسجلة'); return }
+    if (!window.confirm(`سيتم تسجيل ${changed.length} تسوية مخزون حسب الكميات الفعلية. هل راجعت الأرقام؟`)) return
+    const timestamp = new Date().toISOString()
+    setProducts(old => old.map(product => {
+      const counted = changes.find(entry => entry.product.id === product.id)?.count
+      return counted === undefined ? product : { ...product, quantity: counted }
+    }))
+    setStockMovements(old => [
+      ...changed.map(({ product, count }) => ({ id: crypto.randomUUID(), productId: product.id, productName: product.name, kind: count >= product.quantity ? 'in' as const : 'out' as const, quantity: Math.abs(count - product.quantity), reason: 'تسوية جرد', reference: `جرد ${today()}`, date: timestamp, quantityBefore: product.quantity, quantityAfter: count })),
+      ...old,
+    ])
+    logActivity('اعتماد جرد مخزون', today(), changed.length + ' تسوية')
+    setStocktakeOpen(false)
+    setNotice(`تم حفظ الجرد وتسجيل ${changed.length} تسوية في سجل الحركة`)
   }
 
   const saveStockMovement = () => {
@@ -673,6 +947,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       quantityBefore,
       quantityAfter,
     }, ...old])
+    logActivity('تعديل رصيد مخزون', product.code, movementReason.trim() + ' · ' + quantity)
     setStockMovementModal(false)
     setNotice(movementKind === 'in' ? 'تم تسجيل دخول البضاعة وتحديث الكمية' : 'تم تسجيل خروج البضاعة وتحديث الكمية')
   }
@@ -700,15 +975,14 @@ function InventoryApp({ user }: { user: AppUser }) {
     })
   }
 
-  const quoteTotal = quoteRows.reduce(
-    (sum, row) => sum + row.quantity * row.price,
-    0
-  )
+  const quoteTotal = itemsSubtotalFor(quoteRows)
   const invoiceSubtotal = quoteTotal
-  const invoiceDiscountValue = Math.max(0, Number(invoiceDiscount) || 0)
+  const invoiceDiscountInput = Number(invoiceDiscount)
+  const invoiceTaxInput = Number(invoiceTax)
+  const invoiceDiscountValue = roundMoney(Math.max(0, Number(invoiceDiscount) || 0))
   const invoiceTaxValue = Math.max(0, Number(invoiceTax) || 0)
-  const invoiceTotal = Math.max(0, invoiceSubtotal - invoiceDiscountValue) * (1 + invoiceTaxValue / 100)
-  const invoiceBalance = Math.max(0, invoiceTotal - (Number(invoicePaid) || 0))
+  const invoiceTotal = invoiceGrandTotalFor(invoiceSubtotal, invoiceDiscountValue, invoiceTaxValue)
+  const invoiceBalance = roundMoney(Math.max(0, invoiceTotal - (Number(invoicePaid) || 0)))
 
   const resetInvoiceDraft = () => {
     setInvoiceCustomer('')
@@ -727,15 +1001,23 @@ function InventoryApp({ user }: { user: AppUser }) {
       setNotice('اكتب اسم العميل وأضف صنفًا واحدًا على الأقل')
       return
     }
+    if (convertingQuoteId && invoices.some(invoice => invoice.quoteId === convertingQuoteId)) {
+      setNotice('تم تحويل عرض السعر إلى فاتورة بالفعل. راجع قسم الفواتير.')
+      return
+    }
+    if (!invoiceDiscount.trim() || !Number.isFinite(invoiceDiscountInput) || invoiceDiscountInput < 0) {
+      setNotice('الخصم لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
+      return
+    }
     if (invoiceDiscountValue > invoiceSubtotal) {
       setNotice('الخصم لا يمكن أن يكون أكبر من قيمة الأصناف')
       return
     }
-    if (!Number.isFinite(invoiceTaxValue) || invoiceTaxValue < 0 || invoiceTaxValue > 100) {
+    if (!invoiceTax.trim() || !Number.isFinite(invoiceTaxInput) || invoiceTaxInput < 0 || invoiceTaxInput > 100) {
       setNotice('نسبة الضريبة يجب أن تكون بين 0 و100')
       return
     }
-    const paidInput = Number(invoicePaid)
+    const paidInput = roundMoney(Number(invoicePaid))
     if (invoiceStatus !== 'paid' && (!invoicePaid.trim() || !Number.isFinite(paidInput) || paidInput < 0)) {
       setNotice('المبلغ المدفوع لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
       return
@@ -744,11 +1026,6 @@ function InventoryApp({ user }: { user: AppUser }) {
       setNotice('المبلغ المدفوع لا يمكن أن يتجاوز إجمالي الفاتورة')
       return
     }
-    if (!Number.isFinite(invoiceDiscountValue) || invoiceDiscountValue < 0) {
-      setNotice('الخصم لازم يكون رقمًا صحيحًا ولا يقل عن صفر')
-      return
-    }
-
     // Reject invalid line items before calculating totals or touching stock.
     for (const row of quoteRows) {
       if (!row.productId || !row.name.trim() || !Number.isFinite(row.quantity) || row.quantity <= 0 || !Number.isFinite(row.price) || row.price < 0) {
@@ -779,7 +1056,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       return match ? Math.max(max, Number(match[1])) : max
     }, 0) + 1
     const total = invoiceTotal
-    const paid = invoiceStatus === 'paid' ? total : Math.min(total, Math.max(0, Number(invoicePaid) || 0))
+    const paid = invoiceStatus === 'paid' ? total : roundMoney(Math.min(total, Math.max(0, Number(invoicePaid) || 0)))
     const invoice: Invoice = {
       id: crypto.randomUUID(),
       number: `INV-${String(nextInvoiceNumber).padStart(4, '0')}`,
@@ -793,6 +1070,7 @@ function InventoryApp({ user }: { user: AppUser }) {
       status: invoiceStatus === 'paid' || paid >= total ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
       paidAmount: paid,
       notes: invoiceNotes.trim(),
+      ...(convertingQuoteId ? { quoteId: convertingQuoteId } : {}),
     }
     setProducts(old => old.map(product => ({
       ...product,
@@ -807,6 +1085,11 @@ function InventoryApp({ user }: { user: AppUser }) {
       ...old,
     ])
     setInvoices(old => [invoice, ...old])
+    logActivity('إنشاء فاتورة', invoice.number, invoice.customer + ' · ' + money(total))
+    if (convertingQuoteId) {
+      const linkedQuoteId = convertingQuoteId
+      setQuotes(old => old.map(quote => quote.id === linkedQuoteId ? { ...quote, convertedInvoiceId: invoice.id } : quote))
+    }
     // Record any amount collected at invoice creation in the cash ledger as well.
     if (paid > 0) {
       setCashEntries(old => [{
@@ -820,9 +1103,48 @@ function InventoryApp({ user }: { user: AppUser }) {
       }, ...old])
     }
     setInvoiceModal(false)
+    setConvertingQuoteId(null)
     setTab('invoices')
+    setSavedDrafts(old => ({ ...old, invoice: undefined }))
     resetInvoiceDraft()
     setNotice('تم حفظ الفاتورة وخصم الكميات من المخزون بنجاح')
+  }
+
+  const returnInvoice = (invoice: Invoice) => {
+    if ((invoice as Invoice & { returned?: boolean }).returned) { setNotice('تم تسجيل مرتجع لهذه الفاتورة بالفعل'); return }
+    if (!window.confirm(`تأكيد إرجاع كامل الفاتورة ${invoice.number}؟ سيتم إعادة الكميات للمخزون وعكس المبلغ المحصل في الخزنة.`)) return
+    const total = invoiceTotalFor(invoice), paid = roundMoney(Math.max(0, Math.min(total, invoice.paidAmount || 0)))
+    setProducts(old => old.map(product => ({ ...product, quantity: product.quantity + invoice.items.filter(row => row.productId === product.id).reduce((sum, row) => sum + row.quantity, 0) })))
+    setStockMovements(old => [...invoice.items.map(row => ({ id: crypto.randomUUID(), productId: row.productId, productName: row.name, kind: 'in' as const, quantity: row.quantity, reason: 'مرتجع فاتورة', reference: invoice.number, date: today() })), ...old])
+    if (paid > 0) setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount: paid, category: 'رد قيمة مرتجع', note: `مرتجع الفاتورة ${invoice.number} — ${invoice.customer}`, date: today(), invoiceId: invoice.id }, ...old])
+    setInvoices(old => old.map(item => item.id === invoice.id ? { ...item, paidAmount: 0, status: 'unpaid', returned: true } as Invoice : item))
+    setOperations(old => ({ ...old, returns: [{ id: crypto.randomUUID(), date: today(), invoiceId: invoice.id, invoiceNumber: invoice.number, customer: invoice.customer, amount: total }, ...old.returns] }))
+    logActivity('مرتجع فاتورة', invoice.number, invoice.customer + ' · ' + money(total))
+    setNotice('تم تسجيل المرتجع وإعادة المخزون وعكس المقبوضات المرتبطة به')
+  }
+
+  const savePurchase = () => {
+    const product = products.find(item => item.id === purchaseProductId)
+    const quantity = Number(purchaseQuantity), unitCost = roundMoney(Number(purchaseCost)), paid = roundMoney(Number(purchasePaid || 0)), total = roundMoney(quantity * unitCost)
+    if (!product || !purchaseSupplier.trim() || !Number.isInteger(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost <= 0 || !Number.isFinite(paid) || paid < 0 || paid > total) { setNotice('راجع المورد والصنف والكمية والتكلفة والمبلغ المدفوع'); return }
+    const before = product.quantity, after = before + quantity, averageCost = weightedAverageCostFor(before, product.costPrice || 0, quantity, unitCost)
+    setProducts(old => old.map(item => item.id === product.id ? { ...item, quantity: after, costPrice: averageCost } : item))
+    setStockMovements(old => [{ id: crypto.randomUUID(), productId: product.id, productName: product.name, kind: 'in', quantity, reason: 'استلام مشتريات', reference: purchaseSupplier.trim(), date: today(), quantityBefore: before, quantityAfter: after }, ...old])
+    const purchaseId = crypto.randomUUID()
+    setOperations(old => ({ ...old, purchases: [{ id: purchaseId, date: today(), supplier: purchaseSupplier.trim(), productId: product.id, productName: product.name, quantity, unitCost, paid, total }, ...old.purchases] }))
+    logActivity('تسجيل مشتريات', purchaseSupplier.trim(), product.name + ' · ' + quantity)
+    if (paid > 0) setCashEntries(old => [{ id: crypto.randomUUID(), kind: 'out', amount: paid, category: 'شراء بضاعة', note: `${product.name} — ${purchaseSupplier.trim()}`, date: today(), purchaseId }, ...old])
+    const owing = roundMoney(total - paid)
+    if (owing > 0) setSupplierDebts(old => [{ id: crypto.randomUUID(), supplier: purchaseSupplier.trim(), phone: '', reference: 'شراء ' + product.code, description: `${quantity} × ${product.name} بسعر تكلفة ${money(unitCost)}`, amount: owing, date: today(), dueDate: today(), payments: [] }, ...old])
+    setPurchaseQuantity(''); setPurchaseCost(''); setPurchasePaid(''); setNotice('تم تسجيل الشراء وتحديث المخزون ومتوسط التكلفة والخزنة/الدين')
+  }
+
+  const saveCashCount = () => {
+    const actual = roundMoney(Number(cashCountActual))
+    if (!cashCountActual.trim() || !Number.isFinite(actual) || actual < 0) { setNotice('اكتب قيمة النقد الفعلية رقمًا صحيحًا'); return }
+    const expected = cashBalance, difference = cashDifferenceFor(expected, actual)
+    setOperations(old => ({ ...old, cashCounts: [{ id: crypto.randomUUID(), date: today(), expected, actual, difference }, ...old.cashCounts] }))
+    setNotice(`تم حفظ جرد الخزنة. الفرق ${money(difference)}؛ راجعه وسجل أي حركة تصحيحية منفصلة.`); setCashCountActual('')
   }
 
   const deleteInvoice = (invoice: Invoice) => {
@@ -859,10 +1181,15 @@ function InventoryApp({ user }: { user: AppUser }) {
       ...old,
     ])
     setInvoices(old => old.filter(item => item.id !== invoice.id))
+    if (invoice.quoteId) setQuotes(old => old.map(quote => quote.id === invoice.quoteId ? { ...quote, convertedInvoiceId: undefined } : quote))
     setNotice('تم حذف الفاتورة وإرجاع كمياتها للمخزون')
   }
 
   const deleteQuote = (quote: Quote) => {
+    if (invoices.some(invoice => invoice.id === quote.convertedInvoiceId || invoice.quoteId === quote.id)) {
+      setNotice('لا يمكن حذف عرض سعر تم تحويله إلى فاتورة. احذف الفاتورة المرتبطة أولًا إذا كان ذلك ضروريًا.')
+      return
+    }
     if (!window.confirm(`متأكد إنك عايز تحذف عرض السعر ${quote.number}؟`)) return
     setQuotes(old => old.filter(item => item.id !== quote.id))
     setNotice('تم حذف عرض السعر')
@@ -871,7 +1198,7 @@ function InventoryApp({ user }: { user: AppUser }) {
   const printDocument = (html: string, documentName: string) => {
     if (isDesktopApp() && window.alarabiDesktop?.printHtml) {
       void window.alarabiDesktop.printHtml(html)
-        .then(() => setNotice('تم فتح معاينة ' + documentName + ' — تقدر تحفظها PDF من زر الحفظ داخل النافذة'))
+        .then(() => setNotice('تم فتح معاينة ' + documentName + ' في المتصفح الخارجي'))
         .catch(error => setNotice('تعذرت طباعة ' + documentName + ': ' + String(error)))
       return
     }
@@ -888,11 +1215,11 @@ function InventoryApp({ user }: { user: AppUser }) {
   }
 
   const printInvoice = (invoice: Invoice) => {
-    printDocument(invoiceHtml(invoice), 'الفاتورة')
+    printDocument(invoiceHtml(invoice, companySettings), 'الفاتورة')
   }
 
   const recordInvoicePayment = (invoice: Invoice) => {
-    const balance = Math.max(0, invoiceTotalFor(invoice) - Math.max(0, invoice.paidAmount || 0))
+    const balance = roundMoney(Math.max(0, invoiceTotalFor(invoice) - Math.max(0, invoice.paidAmount || 0)))
     if (balance <= 0) { setNotice('الفاتورة مسددة بالكامل بالفعل'); return }
     setPaymentInvoice(invoice)
     setPaymentAmount(String(balance))
@@ -902,15 +1229,15 @@ function InventoryApp({ user }: { user: AppUser }) {
     if (!paymentInvoice) return
     const invoice = paymentInvoice
     const total = invoiceTotalFor(invoice)
-    const balance = Math.max(0, total - Math.max(0, invoice.paidAmount || 0))
-    const amount = Number(paymentAmount)
+    const balance = roundMoney(Math.max(0, total - Math.max(0, invoice.paidAmount || 0)))
+    const amount = roundMoney(Number(paymentAmount))
     if (!Number.isFinite(amount) || amount <= 0) { setNotice('اكتب مبلغ تحصيل صحيحًا أكبر من صفر'); return }
     if (amount > balance) { setNotice('مبلغ التحصيل أكبر من المتبقي على الفاتورة'); return }
     const payment = { id: crypto.randomUUID(), kind: 'in' as const, amount, category: 'تحصيل فاتورة', note: 'تحصيل ' + invoice.number + ' — ' + invoice.customer, date: today(), invoiceId: invoice.id }
     setCashEntries(old => [payment, ...old])
     setInvoices(old => old.map(item => {
       if (item.id !== invoice.id) return item
-      const paidAmount = Math.min(total, Math.max(0, item.paidAmount || 0) + amount)
+      const paidAmount = roundMoney(Math.min(total, Math.max(0, item.paidAmount || 0) + amount))
       return { ...item, paidAmount, status: paidAmount >= total ? 'paid' : 'partial' }
     }))
     setPaymentInvoice(null)
@@ -956,25 +1283,111 @@ function InventoryApp({ user }: { user: AppUser }) {
       customer: customer.trim(),
       date: today(),
       items: quoteRows,
+      phone: quotePhone.trim(),
+      followUpDate: quoteFollowUpDate || undefined,
+      validUntil: addDaysToDate(today(), 7),
+      status: 'new',
     }
 
     setQuotes(old => [quote, ...old])
+    logActivity('إنشاء عرض سعر', quote.number, quote.customer + ' · ' + money(itemsSubtotalFor(quote.items)))
     setQuoteModal(false)
+    setSavedDrafts(old => ({ ...old, quote: undefined }))
     setTab('quotes')
     setCustomer('')
+    setQuotePhone('')
+    setQuoteFollowUpDate('')
     setQuoteRows([])
     setNotice('تم حفظ عرض السعر')
   }
 
   const printQuote = (q: Quote) => {
-    printDocument(quoteHtml(q), 'عرض السعر')
+    printDocument(quoteHtml(q, companySettings), 'عرض السعر')
+  }
+
+  const updateQuote = (quote: Quote, patch: Partial<Quote>) => {
+    setQuotes(old => old.map(item => item.id === quote.id ? { ...item, ...patch } : item))
+    logActivity('تحديث عرض سعر', quote.number, patch.status ? 'الحالة: ' + patch.status : 'موعد متابعة: ' + (patch.followUpDate || 'تم الإلغاء'))
+  }
+
+  const duplicateQuote = (quote: Quote) => {
+    setCustomer(quote.customer)
+    setQuotePhone(quote.phone || '')
+    setQuoteFollowUpDate('')
+    setQuoteRows(quote.items.map(item => ({ ...item })))
+    setQuoteModal(true)
+  }
+
+  const convertQuoteToInvoice = (quote: Quote) => {
+    const existingInvoice = invoices.find(invoice => invoice.id === quote.convertedInvoiceId || invoice.quoteId === quote.id)
+    if (existingInvoice) {
+      setTab('invoices')
+      setNotice(`عرض السعر محول بالفعل إلى الفاتورة ${existingInvoice.number}`)
+      return
+    }
+    setConvertingQuoteId(quote.id)
+    setInvoiceCustomer(quote.customer)
+    setInvoicePhone(quote.phone || '')
+    setInvoiceDueDate('')
+    setInvoiceDiscount('0')
+    setInvoiceTax('0')
+    setInvoiceStatus('unpaid')
+    setInvoicePaid('0')
+    setInvoiceNotes(`تحويل من عرض السعر ${quote.number}`)
+    setQuoteRows(quote.items.map(item => ({ ...item })))
+    setInvoiceModal(true)
+  }
+
+  const closeInvoiceModal = () => {
+    setInvoiceModal(false)
+    setConvertingQuoteId(null)
+    resetInvoiceDraft()
+  }
+
+  const importProductsExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return
+    try {
+      const { default: ExcelJS } = await import('exceljs'); const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(await file.arrayBuffer())
+      const sheet = workbook.worksheets[0]; if (!sheet || sheet.rowCount < 2) throw new Error('الملف فارغ أو لا يحتوي أصنافًا')
+      const labels = new Map<string, number>(); sheet.getRow(1).eachCell((cell, column) => labels.set(String(cell.text || '').trim().toLowerCase(), column))
+      const col = (...names: string[]) => names.map(name => labels.get(name)).find(value => value !== undefined)
+      const codeCol = col('كود الصنف','الكود','code'), nameCol = col('اسم الصنف','الصنف','name')
+      if (!codeCol || !nameCol) throw new Error('يجب إضافة عمودي «كود الصنف» و«اسم الصنف» في الصف الأول')
+      const priceCol=col('سعر البيع','السعر','price'), costCol=col('تكلفة الوحدة','سعر التكلفة','التكلفة','cost'), qtyCol=col('الكمية','quantity'), minCol=col('حد التنبيه','الحد الأدنى','minstock'), catCol=col('الفئة','category')
+      const imported: Product[]=[]
+      sheet.eachRow((row, index) => { if(index===1)return; const code=String(row.getCell(codeCol).text||'').trim(), name=String(row.getCell(nameCol).text||'').trim(); if(!code&&!name)return; const num=(c:number|undefined,d:number)=>c?Number(row.getCell(c).value||d):d; const quantity=num(qtyCol,0),price=num(priceCol,0),costPrice=num(costCol,0),minStock=num(minCol,0); if(!code||!name||![quantity,price,costPrice,minStock].every(Number.isFinite)||quantity<0||price<0||costPrice<0||minStock<0)throw new Error(`بيانات غير صحيحة في الصف ${index}`); imported.push({id:crypto.randomUUID(),code,name,category:catCol?String(row.getCell(catCol).text||'عام'):'عام',quantity,price:roundMoney(price),costPrice:roundMoney(costPrice),minStock}) })
+      const existing=new Set(products.map(p=>p.code.trim().toLowerCase())); const duplicates=imported.filter(p=>existing.has(p.code.trim().toLowerCase()))
+      const seen=new Set<string>(); const duplicateCodes=imported.filter(p=>{const key=p.code.trim().toLowerCase();if(seen.has(key))return true;seen.add(key);return false}).map(p=>p.code)
+      if(duplicates.length||duplicateCodes.length)throw new Error('أكواد مكررة أو موجودة بالفعل: '+[...new Set([...duplicates.map(p=>p.code),...duplicateCodes])].slice(0,5).join('، '))
+      if(!imported.length)throw new Error('لم يتم العثور على أصناف صالحة')
+      setProducts(old=>[...imported,...old]); setNotice(`تم استيراد ${imported.length} صنف من Excel`)
+    } catch(error) { setNotice('تعذر استيراد الأصناف: '+(error instanceof Error?error.message:'خطأ في الملف')) } finally { event.target.value='' }
+  }
+
+  const printCustomerStatement = (customerName: string) => {
+    const docs=invoices.filter(invoice=>invoice.customer.trim().toLowerCase()===customerName.trim().toLowerCase())
+    const esc=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    const rows=docs.map(invoice=>{const returned=!!(invoice as Invoice & {returned?:boolean}).returned; return `<tr><td>${esc(invoice.date)}</td><td>${esc(invoice.number)}</td><td>${returned?'مرتجعة':money(invoiceTotalFor(invoice))}</td><td>${returned?'مرتجعة':money(invoice.paidAmount||0)}</td><td>${returned?money(0):money(Math.max(0,invoiceTotalFor(invoice)-(invoice.paidAmount||0)))}</td></tr>`}).join('')
+    const html=`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>كشف حساب عميل</title><style>body{font:14px Tahoma;padding:24px;color:#243746}table{border-collapse:collapse;width:100%;margin-top:20px}td,th{border:1px solid #ccd5dc;padding:10px;text-align:right}th{background:#173653;color:white}</style><h1>${esc(companySettings.name)} — كشف حساب عميل</h1><p>العميل: ${esc(customerName)} · ${esc(companySettings.address)}</p><table><thead><tr><th>التاريخ</th><th>رقم الفاتورة</th><th>الإجمالي</th><th>المحصل</th><th>المتبقي</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=()=>window.print()</script></html>`
+    printDocument(html, 'كشف حساب العميل')
+  }
+
+  const shareDocumentOnWhatsApp = (kind: 'فاتورة بيع' | 'عرض سعر', number: string, customerName: string, date: string, total: number, balance?: number) => {
+    const text = [`${companySettings.name}`, kind, `رقم المستند: ${number}`, `العميل: ${customerName}`, `التاريخ: ${date}`, `الإجمالي: ${money(total)}`, ...(balance === undefined ? [] : [`المتبقي: ${money(balance)}`]), 'يمكن طباعة المستند أو حفظه PDF من البرنامج.'].join('\n')
+    const url = 'https://wa.me/?text=' + encodeURIComponent(text)
+    if (isDesktopApp() && window.alarabiDesktop?.openWhatsApp) {
+      void window.alarabiDesktop.openWhatsApp(url).catch(error => setNotice('تعذر فتح واتساب: ' + String(error)))
+      return
+    }
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!opened) setNotice('اسمح بالنوافذ المنبثقة لفتح واتساب')
   }
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-mark">
-          <Boxes size={24} />
+          <Boxes size={24} aria-hidden="true" />
         </div>
 
         <div className="brand-name">
@@ -1021,11 +1434,20 @@ function InventoryApp({ user }: { user: AppUser }) {
         </nav>
 
         <button className={tab === 'reports' ? 'nav-item active' : 'nav-item'} data-tutorial-target="reports" onClick={() => setTab('reports')}><Download size={19} /> التقارير والتصدير</button>
-        <button className="nav-item" onClick={() => { setTutorialStep(0); setTab('dashboard') }}>📘 شرح البرنامج</button>
-        <button data-tutorial-target="account" className="nav-item" onClick={() => { if (isDesktopApp()) void window.alarabiDesktop!.localLogout().then(() => window.location.reload()); else void supabase.auth.signOut() }}>تسجيل الخروج</button>
+        <button className={tab === 'customers' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('customers')}><Users size={19} /> العملاء وكشوف الحساب</button>
+        <button className={tab === 'activity' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('activity')}><History size={19} /> سجل النشاط</button>
+        <button className={tab === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => setTab('settings')}><Settings size={19} /> إعدادات الشركة</button>
+        <button className="nav-item" onClick={() => { setTutorialStep(0); setTab('dashboard') }}><ClipboardList size={19} /> شرح البرنامج</button>
+        <button data-tutorial-target="account" className="nav-item" onClick={() => {
+          if (isDesktopApp()) {
+            const result = window.alarabiDesktop!.writeStateBundleSync(desktopStateRef.current)
+            if (!result.ok) { setLocalSaveStatus('error'); setCloudError('تعذر حفظ آخر التغييرات قبل تسجيل الخروج: ' + (result.error || 'خطأ غير متوقع')); return }
+            void window.alarabiDesktop!.localLogout().then(() => window.location.reload())
+          } else void supabase.auth.signOut()
+        }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.0.0</small>
+          <small>v1.1.8</small>
         </div>
       </aside>
 
@@ -1047,27 +1469,30 @@ function InventoryApp({ user }: { user: AppUser }) {
             </div>
           </section>
         </div>}
-        {!cloudLoaded && <div className="notice">جارٍ تحميل بياناتك من السحابة...</div>}
-        {cloudError && <button className="notice" onClick={() => setCloudError('')}>⚠ {cloudError} <X size={15} /></button>}
+        {!cloudLoaded && !cloudError && <BrandedLoadingScreen caption={isDesktopApp() ? 'جارٍ تحميل بيانات المحل' : 'جارٍ تحميل بياناتك من السحابة'} />}
+        {cloudError && <button className="notice" onClick={() => setCloudError('')}><AlertTriangle size={16} aria-hidden="true" /> {cloudError} <X size={15} aria-hidden="true" /></button>}
         <header className="topbar">
           <div>
-            <div className="eyebrow">
-              AL ARABI · EARTHING & LIGHTNING PROTECTION
-            </div>
+            <div className="eyebrow">{companySettings.name}</div>
 
             <h1>
               {tab === 'dashboard'
                 ? 'لوحة التحكم'
                 : tab === 'products'
                   ? 'الأصناف والمخزون'
-                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : tab === 'debts' ? 'ديون الموردين' : tab === 'reports' ? 'التقارير والتصدير' : 'الفواتير'}
+                  : tab === 'quotes' ? 'عروض الأسعار' : tab === 'cash' ? 'الخزنة والحركة المالية' : tab === 'debts' ? 'ديون الموردين' : tab === 'reports' ? 'التقارير والتصدير' : tab === 'customers' ? 'العملاء وكشوف الحساب' : tab === 'activity' ? 'سجل النشاط' : tab === 'settings' ? 'إعدادات الشركة' : 'الفواتير'}
             </h1>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="primary-button" onClick={exportEndOfDay} disabled={!cloudLoaded} title={'حفظ حركة اليوم ولقطة المخزون بتاريخ ' + today()} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <CalendarCheck size={16} /> إنهاء اليوم
+            </button>
             <button type="button" className="secondary-button" onClick={() => { setQuickSearchQuery(''); setQuickSearchOpen(true) }} aria-label="بحث سريع" title="بحث سريع (Ctrl+K)" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
               <Search size={16} /> بحث سريع <kbd style={{ fontSize: 11, padding: '2px 6px', border: '1px solid #d5dde5', borderRadius: 5, background: '#fff' }}>Ctrl K</kbd>
             </button>
+            {savedDrafts.invoice && <button type="button" className="secondary-button" onClick={() => restoreSavedDraft('invoice')}>استعادة مسودة الفاتورة</button>}
+            {savedDrafts.quote && <button type="button" className="secondary-button" onClick={() => restoreSavedDraft('quote')}>استعادة مسودة العرض</button>}
             <div className="today-chip">
               {new Date().toLocaleDateString('ar-EG', {
                 day: 'numeric',
@@ -1075,6 +1500,10 @@ function InventoryApp({ user }: { user: AppUser }) {
                 year: 'numeric',
               })}
             </div>
+            {isDesktopApp() && cloudLoaded && <div className={'save-indicator ' + localSaveStatus} role="status" aria-live="polite">
+              {localSaveStatus === 'saved' ? <Check size={14} aria-hidden="true" /> : localSaveStatus === 'error' ? <AlertTriangle size={14} aria-hidden="true" /> : <span className="saving-spinner" aria-hidden="true" />}
+              {localSaveStatus === 'saved' ? 'تم الحفظ محليًا' : localSaveStatus === 'error' ? 'تعذر الحفظ' : 'جارٍ حفظ التغييرات'}
+            </div>}
           </div>
         </header>
 
@@ -1095,16 +1524,18 @@ function InventoryApp({ user }: { user: AppUser }) {
                     setTab(result.type)
                     setArchiveQuery(quickSearchQuery)
                     if (result.type === 'products') setQuery(quickSearchQuery)
+                    if (result.type === 'customers') setCustomerSearch(quickSearchQuery)
+                    if (result.type === 'debts') setDebtSearch(quickSearchQuery)
                     setQuickSearchOpen(false)
                   }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 10px', border: 0, borderRadius: 9, background: 'transparent', textAlign: 'right', cursor: 'pointer', color: '#173653' }}>
                     <span style={{ width: 38, height: 38, flexShrink: 0, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#edf3f7' }}>
-                      {result.type === 'products' ? <Package size={18} /> : result.type === 'invoices' ? <Receipt size={18} /> : result.type === 'quotes' ? <FileText size={18} /> : <Wallet size={18} />}
+                      {result.type === 'products' ? <Package size={18} /> : result.type === 'invoices' ? <Receipt size={18} /> : result.type === 'quotes' ? <FileText size={18} /> : result.type === 'customers' ? <Users size={18} /> : result.type === 'debts' ? <CircleDollarSign size={18} /> : <Wallet size={18} />}
                     </span>
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <strong style={{ display: 'block' }}>{result.title}</strong>
                       <span style={{ display: 'block', color: '#718397', fontSize: 12, marginTop: 3, overflowWrap: 'anywhere' }}>{result.subtitle}</span>
                     </span>
-                    <span style={{ color: '#718397', fontSize: 11, whiteSpace: 'nowrap' }}>{result.type === 'products' ? 'الأصناف / حركة مخزون' : result.type === 'invoices' ? 'فاتورة' : result.type === 'quotes' ? 'عرض سعر' : 'الخزنة'}</span>
+                    <span style={{ color: '#718397', fontSize: 11, whiteSpace: 'nowrap' }}>{result.type === 'products' ? 'الأصناف / حركة مخزون' : result.type === 'invoices' ? 'فاتورة' : result.type === 'quotes' ? 'عرض سعر' : result.type === 'customers' ? 'عميل' : result.type === 'debts' ? 'مورد' : 'الخزنة'}</span>
                   </button>
                 )) : <div style={{ padding: 24, textAlign: 'center', color: '#718397' }}>مفيش نتائج مطابقة للبحث ده.</div>}
               </div>
@@ -1113,8 +1544,8 @@ function InventoryApp({ user }: { user: AppUser }) {
           </div>
         )}
 
-        {notice && (
-          <button className="notice" onClick={() => setNotice('')}>
+        {notice && !productModal && !invoiceModal && (
+          <button className="notice-toast" role="status" onClick={() => setNotice('')}>
             <Check size={16} />
             {notice}
             <X size={15} />
@@ -1125,7 +1556,7 @@ function InventoryApp({ user }: { user: AppUser }) {
           <>
             <section className="welcome">
               <div>
-                <span className="welcome-label">أهلًا بيك 👋</span>
+                <span className="welcome-label">إدارة المبيعات والمخزون</span>
                 <h2>أنظمة التأريض والحماية من الصواعق.</h2>
                 <p>
                   تابع الأصناف والكميات، وراجع المخزون وجهّز عروض الأسعار
@@ -1134,7 +1565,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               </div>
 
               <div className="welcome-art">
-                <Boxes size={70} />
+                <Boxes size={64} aria-hidden="true" />
               </div>
             </section>
 
@@ -1144,7 +1575,26 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<AlertTriangle />} label="مستحقات العملاء" value={money(customerBalances)} foot={unpaidInvoices.length + ' فاتورة عليها رصيد'} warning={customerBalances > 0} />
               <Stat icon={<Wallet />} label="رصيد الخزنة المسجل" value={money(cashBalance)} foot="من حركات الخزنة اليدوية فقط" />
               <Stat icon={<TrendingUp />} label="تكلفة البضاعة المباعة المسجلة" value={money(knownCostSales)} foot={hasMissingCosts ? `بيانات مكتملة لـ ${costCompleteInvoices.length} من ${invoices.length} فاتورة` : 'حسب تكلفة الشراء المحفوظة بالفواتير'} warning={hasMissingCosts} />
-              <Stat icon={<CircleDollarSign />} label="هامش إجمالي تقديري" value={money(estimatedGrossProfit)} foot={hasMissingCosts ? 'تقدير للفواتير المكتملة فقط، قبل المصروفات والضرائب' : 'المبيعات بعد الخصم وقبل الضريبة ناقص التكلفة'} warning={hasMissingCosts} />
+              <Stat icon={<CircleDollarSign />} label="صافي تقديري بعد المصروفات" value={money(knownNetProfit)} foot={(hasMissingCosts ? 'فقط للفواتير ذات التكلفة المسجلة؛ ' : '') + 'هامش تقديري ' + estimatedProfitMargin + '% قبل الضريبة'} warning={hasMissingCosts} />
+            </section>
+
+            <section className="dashboard-insights">
+              <div className="panel"><div className="panel-head"><div><h3>المبيعات خلال آخر 7 أيام</h3><p>إجمالي قيمة الفواتير النشطة حسب تاريخها</p></div></div><div className="sales-bars">{recentSales.map(day=><div className="sales-bar-item" key={day.date} title={`${day.date}: ${money(day.total)}`}><strong>{day.total ? money(day.total) : '—'}</strong><div className="sales-bar-track"><span style={{height:`${Math.max(day.total ? 8 : 2, day.total/maxDailySales*100)}%`}}/></div><small>{day.label}</small></div>)}</div></div>
+              <div className="panel"><div className="panel-head"><div><h3>الأكثر مبيعًا</h3><p>بالكمية المسجلة في الفواتير</p></div></div>{topProducts.length?<ol className="top-products">{topProducts.map((item,index)=><li key={item.name+index}><span>{item.name}</span><b>{item.quantity} وحدة</b></li>)}</ol>:<p className="muted">ستظهر الأصناف بعد تسجيل فواتير البيع.</p>}</div>
+            </section>
+
+            <section className="panel"><div className="panel-head products-head"><div><h3>توقع نفاد المخزون وقائمة الشراء</h3><p>تقدير من المبيعات خلال آخر 30 يومًا؛ راجع الكميات قبل الشراء.</p></div><button className="secondary-btn" onClick={printReorderList}><Printer size={15}/> طباعة قائمة الشراء</button></div>{reorderSuggestions.length ? <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>المتاح</th><th>متوسط البيع اليومي</th><th>النفاد المتوقع</th><th>كمية الشراء المقترحة</th></tr></thead><tbody>{reorderSuggestions.slice(0,12).map(item=><tr key={item.product.id}><td>{item.product.name}</td><td>{item.product.quantity}</td><td>{item.dailyRate.toFixed(2)}</td><td>{item.daysLeft === null ? 'لا توجد مبيعات حديثة' : item.daysLeft + ' يوم'}</td><td><b>{item.buyQuantity}</b></td></tr>)}</tbody></table></div> : <p className="muted">لا توجد أصناف منخفضة أو متوقع نفادها خلال أسبوعين.</p>}</section>
+
+            <section className="panel">
+              <div className="panel-head"><div><h3>مركز التنبيهات</h3><p>الحاجات اللي محتاجة مراجعتك دلوقتي</p></div></div>
+              <div className="alert-list">
+                {lowStock.length > 0 && <button className="alert-row" onClick={() => setTab('products')}><AlertTriangle size={17}/> {lowStock.length} صنف وصل لحد التنبيه أو أقل</button>}
+                {dueCustomerInvoices.length > 0 && <button className="alert-row" onClick={() => setTab('invoices')}><AlertTriangle size={17}/> {dueCustomerInvoices.length} فاتورة عميل متأخرة عن الاستحقاق</button>}
+                {overdueSupplierDebts.length > 0 && <button className="alert-row" onClick={() => setTab('debts')}><AlertTriangle size={17}/> {overdueSupplierDebts.length} دين مورد متأخر</button>}
+                {activeOverdueQuotes.length > 0 && <button className="alert-row" onClick={() => setTab('quotes')}><CalendarCheck size={17}/> {activeOverdueQuotes.length} عرض سعر قديم لم يتحول لفاتورة</button>}
+                {expiredQuotes.length > 0 && <button className="alert-row" onClick={() => setTab('quotes')}><AlertTriangle size={17}/> {expiredQuotes.length} عرض سعر انتهت صلاحيته</button>}
+                {!lowStock.length && !dueCustomerInvoices.length && !overdueSupplierDebts.length && !activeOverdueQuotes.length && !expiredQuotes.length && <p className="muted">لا توجد تنبيهات معلقة حاليًا.</p>}
+              </div>
             </section>
 
             <section className="panel">
@@ -1182,7 +1632,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               <div className="panel-head">
                 <div>
                   <h3>نسخة احتياطية من بيانات الشركة</h3>
-                  <p>نزّل نسخة من الأصناف وعروض الأسعار والفواتير والخزنة، أو استرجع ملفًا سابقًا. الاسترجاع يستبدل البيانات الحالية.</p>
+                  <p>{isDesktopApp() ? 'ينشئ البرنامج تلقائيًا نسخة محلية كل 30 دقيقة ويحتفظ بآخر 24 نسخة. نزّل أيضًا نسخة JSON قبل نقل الجهاز، أو استرجع ملفًا سابقًا.' : 'نزّل نسخة JSON بعد العمل واحفظها بمكان آمن. النسخ التلقائي كل 30 دقيقة متاح في إصدار Windows المكتبي.'}</p>
                 </div>
                 <div className="backup-actions">
                   <button className="primary-button" onClick={exportBackup}>
@@ -1253,6 +1703,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                         <th>الكود</th>
                         <th>الكمية الحالية</th>
                         <th>الحد الأدنى</th>
+                        <th>كمية الشراء المقترحة</th>
                         <th>الحالة</th>
                       </tr>
                     </thead>
@@ -1264,6 +1715,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                           <td><code>{p.code}</code></td>
                           <td>{p.quantity}</td>
                           <td>{p.minStock}</td>
+                          <td><b>{Math.max(0, (p.targetStock ?? Math.max(p.minStock + 1, p.minStock * 3)) - p.quantity)}</b></td>
                           <td>
                             <span className="pill danger">
                               مخزون منخفض
@@ -1313,7 +1765,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                       <strong>
                         {money(
                           q.items.reduce(
-                            (s, x) => s + x.quantity * x.price,
+                            (s, x) => s + lineTotalFor(x),
                             0
                           )
                         )}
@@ -1348,8 +1800,10 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Stat icon={<ClipboardList />} label="عدد الحركات" value={String(cashEntries.length)} foot="حركة مالية مسجلة" />
             </section>
             <section className="panel"><div className="panel-head products-head"><div><h3>حركة الخزنة</h3><p>سجّل أي مبلغ داخل أو خارج وتابع الرصيد</p></div><button className="primary-btn" onClick={() => { setCashKind('in'); setCashModal(true) }}><Plus size={17} /> تسجيل حركة مالية</button></div>
+            <div className="cash-reconcile"><strong>جرد نقدية الصندوق</strong><span>الرصيد الدفتري: {money(cashBalance)}</span><label className="field"><span>النقد الفعلي</span><input type="number" min="0" step="0.01" value={cashCountActual} onChange={e=>setCashCountActual(e.target.value)} placeholder="المبلغ الموجود بالصندوق"/></label><button className="secondary-btn" onClick={saveCashCount}>حفظ نتيجة الجرد</button></div>
+            {operations.cashCounts.length>0&&<p className="muted">آخر جرد {operations.cashCounts[0].date}: الفعلي {money(operations.cashCounts[0].actual)} · الفرق {money(operations.cashCounts[0].difference)}</p>}
             <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث بالبند أو الملاحظات أو التاريخ أو المبلغ..." /></label><span className="muted">{filteredCashEntries.length} حركة</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
-            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : entry.supplierDebtPaymentId ? <span className="muted">مرتبطة بسداد دين</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
+            {filteredCashEntries.length ? <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>ملاحظات</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody>{filteredCashEntries.map(entry => <tr key={entry.id}><td>{entry.date}</td><td><span className={entry.kind === 'in' ? 'pill success' : 'pill danger'}>{entry.kind === 'in' ? 'مبلغ داخل' : 'مبلغ خارج'}</span></td><td className="product-cell">{entry.category}</td><td>{entry.note || '—'}</td><td><strong>{entry.kind === 'in' ? '+' : '−'} {money(entry.amount)}</strong></td><td>{entry.invoiceId ? <span className="muted">مرتبطة بفاتورة</span> : entry.supplierDebtPaymentId ? <span className="muted">مرتبطة بسداد دين</span> : entry.purchaseId ? <span className="muted">مرتبطة بعملية شراء</span> : <button className="icon-btn delete" title="حذف الحركة" aria-label="حذف الحركة" onClick={() => deleteCashEntry(entry)}><Trash2 size={16} /></button>}</td></tr>)}</tbody></table></div> : <Empty title="لسه مفيش حركات مالية" detail="سجّل أول مبلغ داخل أو خارج لمتابعة الخزنة." />}
             </section>
           </>
         )}
@@ -1363,9 +1817,11 @@ function InventoryApp({ user }: { user: AppUser }) {
               </div>
 
               <div className="products-actions">
+                <label className="secondary-button" style={{display:'inline-flex',alignItems:'center',gap:7,cursor:'pointer'}}><Upload size={16}/> استيراد Excel<input type="file" accept=".xlsx" hidden onChange={importProductsExcel}/></label>
                 <button className="secondary-button" onClick={recordStockMovement}>
                   <Boxes size={17} /> تسجيل حركة مخزون
                 </button>
+                <button className="secondary-button" onClick={beginStocktake}><ClipboardList size={17} /> جرد المخزون</button>
                 <button className="primary-btn" onClick={() => openProduct()}>
                   <Plus size={17} /> إضافة صنف
                 </button>
@@ -1507,6 +1963,11 @@ function InventoryApp({ user }: { user: AppUser }) {
 
         {tab === 'debts' && (
           <>
+            <section className="panel"><div className="panel-head"><div><h3>استلام مشتريات</h3><p>يسجل البضاعة الواردة، ويحدّث متوسط تكلفة الصنف والخزنة أو دين المورد.</p></div></div>
+              <div className="form-grid"><label className="field"><span>المورد *</span><input value={purchaseSupplier} onChange={e=>setPurchaseSupplier(e.target.value)} placeholder="اسم المورد"/></label><label className="field"><span>الصنف *</span><select value={purchaseProductId} onChange={e=>setPurchaseProductId(e.target.value)}><option value="">اختر الصنف</option>{products.map(p=><option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}</select></label><label className="field"><span>الكمية *</span><input type="number" min="1" step="1" value={purchaseQuantity} onChange={e=>setPurchaseQuantity(e.target.value)}/></label><label className="field"><span>تكلفة الوحدة *</span><input type="number" min="0.01" step="0.01" value={purchaseCost} onChange={e=>setPurchaseCost(e.target.value)}/></label><label className="field"><span>المدفوع الآن</span><input type="number" min="0" step="0.01" value={purchasePaid} onChange={e=>setPurchasePaid(e.target.value)}/></label></div>
+              {Number(purchaseQuantity)>0&&Number(purchaseCost)>0&&<p className="muted">إجمالي الشراء: {money(Number(purchaseQuantity)*Number(purchaseCost))} · الدين المتبقي: {money(Math.max(0,Number(purchaseQuantity)*Number(purchaseCost)-Number(purchasePaid||0)))}</p>}
+              <div style={{display:'flex',justifyContent:'flex-end',marginTop:12}}><button className="primary-btn" onClick={savePurchase} disabled={!products.length}><Plus size={16}/> تسجيل واستلام البضاعة</button></div>
+            </section>
             <section className="stats-grid">
               <Stat icon={<CircleDollarSign />} label="إجمالي الديون" value={money(supplierDebts.reduce((sum, debt) => sum + debt.amount, 0))} foot="إجمالي المبالغ المسجلة للموردين" />
               <Stat icon={<Wallet />} label="إجمالي المسدد" value={money(supplierDebts.reduce((sum, debt) => sum + debtPaid(debt), 0))} foot="مدفوعات مسجلة ومربوطة بالخزنة" />
@@ -1546,7 +2007,7 @@ function InventoryApp({ user }: { user: AppUser }) {
 
         {tab === 'reports' && (
           <section className="reports-page" dir="rtl">
-            <div className="panel"><div className="panel-head"><div><h3>مركز التقارير</h3><p>تقارير المبيعات والخزنة والمخزون — كحلي ورمادي ولمسات حمراء.</p></div><span className="muted">AL / DATA</span></div>
+            <div className="panel"><div className="panel-head"><div><h3>مركز التقارير</h3><p>راجع المبيعات وحركة الخزنة والمخزون خلال الفترة التي تحددها.</p></div><span className="muted">AL / DATA</span></div>
               <div className="report-filters">
                 <label>من تاريخ<input type="date" value={reportFrom} onChange={e=>setReportFrom(e.target.value)} /></label>
                 <label>إلى تاريخ<input type="date" value={reportTo} onChange={e=>setReportTo(e.target.value)} /></label>
@@ -1558,25 +2019,31 @@ function InventoryApp({ user }: { user: AppUser }) {
               {reportKind==='sales'?<><Stat icon={<Receipt/>} label="إجمالي المبيعات" value={money(reportSales)} foot={reportInvoices.length+' فاتورة'}/><Stat icon={<Wallet/>} label="المحصّل" value={money(reportCollected)} foot="حسب مبالغ السداد المسجلة"/><Stat icon={<AlertTriangle/>} label="المتبقي" value={money(reportBalance)} foot="مستحقات العملاء" warning={reportBalance>0}/></>:reportKind==='cash'?<><Stat icon={<ArrowDownLeft/>} label="مبالغ داخلة" value={money(reportCashIn)} foot="إجمالي الداخل"/><Stat icon={<ArrowUpRight/>} label="مبالغ خارجة" value={money(reportCashOut)} foot="إجمالي الخارج"/><Stat icon={<Wallet/>} label="صافي الحركة" value={money(reportCashIn-reportCashOut)} foot="داخل ناقص خارج"/></>:<><Stat icon={<Package/>} label="عدد الأصناف" value={String(products.length)} foot="الأصناف المسجلة"/><Stat icon={<Boxes/>} label="إجمالي الوحدات" value={String(products.reduce((s,p)=>s+p.quantity,0))} foot="الرصيد الحالي"/><Stat icon={<AlertTriangle/>} label="أصناف منخفضة" value={String(lowStock.length)} foot="عند الحد الأدنى أو أقل" warning={lowStock.length>0}/></>}
             </div>
             <div className="panel"><div className="panel-head"><div><h3>{reportKind==='sales'?'تفاصيل الفواتير':reportKind==='cash'?'الحركات المالية':'كشف المخزون'}</h3><p>التصدير يشمل البيانات المحددة أدناه.</p></div><div className="report-actions">
-              <button className="primary-btn" onClick={()=>{
+              <button className="primary-btn" onClick={async()=>{
                 const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون بسعر التكلفة'];
                 const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
-                const sheet=XLSX.utils.aoa_to_sheet([headers,...rows]);
-                sheet['!cols']=headers.map((h,index)=>({wch:Math.min(32,Math.max(14,String(h).length+4,...rows.map(row=>String(row[index]??'').length+2)))}));
-                const workbook=XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook,sheet,reportKind==='sales'?'المبيعات':reportKind==='cash'?'الخزنة':'المخزون');
                 const fileName=(reportKind==='sales'?'alarabi-sales':reportKind==='cash'?'alarabi-cash':'alarabi-inventory')+'-'+today()+'.xlsx';
-                XLSX.writeFile(workbook,fileName,{compression:true});
-                setNotice('تم تصدير ملف Excel بصيغة XLSX بنجاح')
+                try {
+                  const {default:ExcelJS}=await import('exceljs');
+                  const workbook=new ExcelJS.Workbook();
+                  const sheet=workbook.addWorksheet(reportKind==='sales'?'المبيعات':reportKind==='cash'?'الخزنة':'المخزون');
+                  sheet.columns=headers.map((header,index)=>({header,key:'column'+index,width:Math.min(32,Math.max(14,String(header).length+4,...rows.map(row=>String(row[index]??'').length+2)))}));
+                  sheet.addRows(rows);
+                  const buffer=await workbook.xlsx.writeBuffer();
+                  const url=URL.createObjectURL(new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+                  const link=document.createElement('a');link.href=url;link.download=fileName;document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+                  setNotice('تم تصدير ملف Excel بصيغة XLSX بنجاح')
+                } catch (error) {
+                  setNotice('تعذر تصدير ملف Excel: '+(error instanceof Error?error.message:'خطأ غير متوقع'))
+                }
               }}><Download size={16}/> تصدير Excel</button>
               <button className="secondary-btn" onClick={()=>{
                 const headers=reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['كود الصنف','اسم الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون'];
                 const rows:(string|number)[][]=reportKind==='sales'?reportInvoices.map(i=>[i.date,i.number,i.customer,invoiceTotalFor(i),i.paidAmount||0,Math.max(0,invoiceTotalFor(i)-(i.paidAmount||0)),i.status==='paid'?'مدفوعة':i.status==='partial'?'جزئيًا':'غير مدفوعة']):reportKind==='cash'?reportCash.map(e=>[e.date,e.kind==='in'?'داخل':'خارج',e.category,e.note,e.amount]):products.map(p=>[p.code,p.name,p.category,p.quantity,p.minStock,p.price,p.costPrice??0,p.quantity*(p.costPrice??0)]);
                 const title=reportKind==='sales'?'تقرير المبيعات والفواتير':reportKind==='cash'?'تقرير الخزنة والحركة المالية':'تقرير الأصناف والمخزون';
-                const esc=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                const table='<table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
-                const w=window.open('','_blank');if(!w){setNotice('اسمح بفتح النوافذ المنبثقة لطباعة التقرير');return}
-                w.document.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>'+title+'</title><style>body{font:12px Tahoma,Arial,sans-serif;color:#263746;padding:20px}h1{color:#173653;border-right:5px solid #c83d46;padding-right:12px}.brand{border-bottom:3px solid #c83d46;padding-bottom:12px;margin-bottom:18px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#173653;color:white}th,td{border:1px solid #cfd7df;padding:8px;text-align:right}tr:nth-child(even){background:#f1f4f7}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="brand"><h1>'+title+'</h1><strong>'+COMPANY+'</strong><p>الفترة: '+(reportFrom||'من البداية')+' — '+(reportTo||'حتى اليوم')+' | تاريخ التصدير: '+today()+'</p></div>'+table+'<script>window.onload=()=>window.print()</script></body></html>');w.document.close()
+                const table='<table><thead><tr>'+headers.map(h=>'<th>'+escapeHtml(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+escapeHtml(String(v??''))+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+                const html='<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+escapeHtml(title)+'</title><style>body{font:12px Tahoma,Arial,sans-serif;color:#263746;padding:20px}.actions{display:flex;gap:8px;justify-content:flex-start;margin:0 0 16px}.actions button{border:0;border-radius:6px;padding:9px 14px;background:#173653;color:white;font-weight:bold;cursor:pointer}.actions button.secondary{background:#edf1f5;color:#263746}.brand{border-bottom:3px solid #c83d46;padding-bottom:12px;margin-bottom:18px}h1{color:#173653;border-right:5px solid #c83d46;padding-right:12px}table{width:100%;border-collapse:collapse;margin-top:18px}th{background:#173653;color:white}th,td{border:1px solid #cfd7df;padding:8px;text-align:right}tr:nth-child(even){background:#f1f4f7}@page{size:A4 landscape;margin:12mm}@media print{body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">طباعة التقرير</button><button class="secondary" onclick="if(window.alarabiDesktop){window.alarabiDesktop.savePreviewPdf().then(r=>{if(r.ok)alert(&#39;تم حفظ التقرير PDF&#39;)}).catch(e=>alert(&#39;تعذر حفظ PDF: &#39;+e.message))}else{window.print()}">حفظ PDF</button></div><div class="brand"><h1>'+escapeHtml(title)+'</h1><strong>'+escapeHtml(companySettings.name)+'</strong><p>الفترة: '+escapeHtml(reportFrom||'من البداية')+' — '+escapeHtml(reportTo||'حتى اليوم')+' | تاريخ التصدير: '+escapeHtml(today())+'</p></div>'+table+'</body></html>';
+                printDocument(html,'التقرير')
               }}><Printer size={16}/> طباعة / حفظ PDF</button>
             </div></div>
             <div className="table-wrap"><table><thead><tr>{(reportKind==='sales'?['التاريخ','رقم الفاتورة','العميل','الإجمالي','المدفوع','المتبقي','الحالة']:reportKind==='cash'?['التاريخ','النوع','البند','ملاحظات','المبلغ']:['الكود','الصنف','الفئة','الكمية','حد التنبيه','سعر البيع','تكلفة الوحدة','قيمة المخزون']).map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>
@@ -1608,10 +2075,13 @@ function InventoryApp({ user }: { user: AppUser }) {
                   return <tr key={inv.id}>
                     <td><code>{inv.number}</code></td><td className="product-cell">{inv.customer}</td><td>{inv.date}</td>
                     <td>{money(total)}</td><td>{money(inv.paidAmount)}</td><td>{money(balance)}</td>
-                    <td><span className={inv.status === 'paid' ? 'pill success' : 'pill danger'}>{inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
+                    <td><span className={(inv as Invoice & {returned?:boolean}).returned ? 'pill warning' : inv.status === 'paid' ? 'pill success' : 'pill danger'}>{(inv as Invoice & {returned?:boolean}).returned ? 'مرتجعة' : inv.status === 'paid' ? 'مدفوعة' : inv.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'}</span></td>
                     <td className="actions">
                       <button className="icon-btn" aria-label="طباعة الفاتورة" onClick={() => printInvoice(inv)}><Printer size={16} /></button>
-                      {inv.status !== 'paid' && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
+                      <button className="secondary-btn invoice-status-btn" onClick={() => shareDocumentOnWhatsApp('فاتورة بيع', inv.number, inv.customer, inv.date, total, (inv as Invoice & {returned?:boolean}).returned ? 0 : balance)}><MessageCircle size={14}/> واتساب</button>
+                      <button className="secondary-btn invoice-status-btn" onClick={() => printCustomerStatement(inv.customer)}>كشف العميل</button>
+                      {inv.status !== 'paid' && !(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => recordInvoicePayment(inv)}>تحصيل دفعة</button>}
+                      {!(inv as Invoice & {returned?:boolean}).returned && <button className="secondary-btn invoice-status-btn" onClick={() => returnInvoice(inv)} title="تسجيل مرتجع كامل وإعادة الكميات للمخزون"><RotateCcw size={14}/> مرتجع</button>}
                       <button className="icon-btn delete" aria-label="حذف الفاتورة" title="حذف الفاتورة" onClick={() => deleteInvoice(inv)}><Trash2 size={16} /></button>
                     </td>
                   </tr>
@@ -1626,7 +2096,7 @@ function InventoryApp({ user }: { user: AppUser }) {
             <div className="panel-head products-head">
               <div>
                 <h3>عروض الأسعار</h3>
-                <p>أنشئ عرضًا واطبعه أو احفظه كـ PDF</p>
+                <p>أنشئ عرضًا واطبعه أو حوّله إلى فاتورة عند التنفيذ</p>
               </div>
 
               <button
@@ -1637,7 +2107,8 @@ function InventoryApp({ user }: { user: AppUser }) {
               </button>
             </div>
 
-            <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث برقم العرض أو اسم العميل أو الصنف..." /></label><span className="muted">{filteredQuotes.length} عرض</span><button className="secondary-btn" onClick={() => setArchiveQuery('')}>مسح البحث</button></div>
+            <div className="toolbar"><label className="searchbox"><Search size={18} /><input value={archiveQuery} onChange={e => setArchiveQuery(e.target.value)} placeholder="ابحث برقم العرض أو اسم العميل أو الصنف..." /></label><label className="field quote-date-filter"><span>من تاريخ</span><input type="date" value={quoteFrom} onChange={e=>setQuoteFrom(e.target.value)} /></label><label className="field quote-date-filter"><span>إلى تاريخ</span><input type="date" value={quoteTo} onChange={e=>setQuoteTo(e.target.value)} /></label><button className="secondary-btn" onClick={() => {setArchiveQuery('');setQuoteFrom('');setQuoteTo('')}}>مسح البحث والتاريخ</button></div>
+            <div className="quote-totals-strip"><span>{filteredQuotes.length} عرض سعر في النتائج</span><strong>إجمالي قيمة العروض: {money(filteredQuotes.reduce((sum, quote) => sum + itemsSubtotalFor(quote.items), 0))}</strong></div>
             {filteredQuotes.length ? (
               <div className="quote-list">
                 {filteredQuotes.map(q => (
@@ -1649,18 +2120,23 @@ function InventoryApp({ user }: { user: AppUser }) {
                     <div className="quote-info">
                       <b>{q.number}</b>
                       <span>
-                        {q.customer} · {q.date} · {q.items.length} صنف
+                        {q.customer} · {q.date} · {q.items.length} صنف{q.phone ? ' · ' + q.phone : ''}{q.followUpDate ? ' · متابعة ' + q.followUpDate : ''}
                       </span>
                     </div>
 
                     <strong>
-                      {money(
-                        q.items.reduce(
-                          (s, x) => s + x.quantity * x.price,
-                          0
-                        )
-                      )}
+                      {money(itemsSubtotalFor(q.items))}
                     </strong>
+
+                    {invoices.some(invoice => invoice.id === q.convertedInvoiceId || invoice.quoteId === q.id) ? (
+                      <span className="pill success">تم التنفيذ · {invoices.find(invoice => invoice.id === q.convertedInvoiceId || invoice.quoteId === q.id)?.number || 'فاتورة'}</span>
+                    ) : (
+                      <button className="secondary-btn quote-convert-btn" onClick={() => convertQuoteToInvoice(q)}><Receipt size={15} /> تم التنفيذ — إنشاء فاتورة</button>
+                    )}
+
+                    {!invoices.some(invoice => invoice.id === q.convertedInvoiceId || invoice.quoteId === q.id) && <select aria-label="حالة عرض السعر" value={q.status || 'new'} onChange={e => updateQuote(q, { status: e.target.value as NonNullable<Quote['status']> })}><option value="new">جديد</option><option value="follow-up">متابعة</option><option value="accepted">مقبول</option><option value="declined">مرفوض</option><option value="expired">منتهي</option></select>}
+                    <input className="quote-date-filter" aria-label="موعد متابعة العرض" title="موعد المتابعة" type="date" value={q.followUpDate || ''} onChange={e => updateQuote(q, { followUpDate: e.target.value || undefined })} />
+                    <button className="secondary-btn quote-convert-btn" onClick={() => duplicateQuote(q)} title="إنشاء عرض جديد بنفس الأصناف والبيانات"><Copy size={14}/> نسخة جديدة</button>
 
                     <button
                       className="icon-btn"
@@ -1669,6 +2145,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                     >
                       <Printer size={17} />
                     </button>
+                    <button className="secondary-btn quote-convert-btn" onClick={() => shareDocumentOnWhatsApp('عرض سعر', q.number, q.customer, q.date, itemsSubtotalFor(q.items))}><MessageCircle size={14}/> واتساب</button>
                     <button className="icon-btn delete" aria-label="حذف عرض السعر" title="حذف عرض السعر" onClick={() => deleteQuote(q)}>
                       <Trash2 size={17} />
                     </button>
@@ -1683,7 +2160,29 @@ function InventoryApp({ user }: { user: AppUser }) {
             )}
           </section>
         )}
+
+        {tab === 'customers' && (
+          <section className="panel"><div className="panel-head"><div><h3>العملاء والأرصدة</h3><p>ملخص الفواتير والتحصيل والمتبقي لكل عميل.</p></div></div><div className="toolbar"><label className="searchbox"><Search size={18}/><input value={customerSearch} onChange={e=>setCustomerSearch(e.target.value)} placeholder="ابحث باسم العميل أو الهاتف..."/></label><span className="muted">{customerSummaries.length} عميل</span></div><div className="table-wrap"><table><thead><tr><th>العميل</th><th>الهاتف</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th>المحصّل</th><th>المتبقي</th><th>إجراء</th></tr></thead><tbody>{customerSummaries.filter(customer=>(customer.name+' '+customer.phone).toLocaleLowerCase().includes(customerSearch.trim().toLocaleLowerCase())).map(customer=><tr key={customer.name.toLocaleLowerCase()}><td>{customer.name}</td><td>{customer.phone || '—'}</td><td>{customer.invoices}</td><td>{money(customer.sales)}</td><td>{money(customer.paid)}</td><td><b>{money(customer.balance)}</b></td><td><button className="secondary-btn" onClick={()=>printCustomerStatement(customer.name)}><Printer size={14}/> كشف حساب</button></td></tr>)}</tbody></table></div>{!customerSummaries.length&&<Empty title="لا توجد فواتير مسجلة" detail="سيظهر العميل هنا بعد إنشاء أول فاتورة."/>}</section>
+        )}
+
+        {tab === 'activity' && (
+          <section className="panel"><div className="panel-head"><div><h3>سجل النشاط الأخير</h3><p>آخر الفواتير والعروض وحركات الخزنة والمخزون والتعديلات المسجلة.</p></div><span className="muted">{recentActivity.length} حركة</span></div>{recentActivity.length?<div className="table-wrap"><table><thead><tr><th>التاريخ والوقت</th><th>النشاط</th><th>المرجع</th><th>التفاصيل</th></tr></thead><tbody>{recentActivity.map(item=><tr key={item.id}><td>{new Date(item.date).toLocaleString('ar-EG')}</td><td>{item.action}</td><td>{item.reference || '—'}</td><td>{item.detail || '—'}</td></tr>)}</tbody></table></div>:<Empty title="لا يوجد نشاط مسجل بعد" detail="ستظهر هنا الحركات الجديدة تلقائيًا."/>}</section>
+        )}
+
+        {tab === 'settings' && (
+          <section className="panel"><div className="panel-head"><div><h3>بيانات الفواتير وعروض الأسعار</h3><p>تظهر التعديلات التالية في المستندات الجديدة عند الطباعة والمشاركة.</p></div></div><div className="form-grid"><Field label="اسم الشركة" value={companySettings.name} onChange={v=>updateCompanyField('name',v)}/><Field label="العنوان" value={companySettings.address} onChange={v=>updateCompanyField('address',v)}/><Field label="البريد الإلكتروني" value={companySettings.email} onChange={v=>updateCompanyField('email',v)}/><Field label="اسم جهة التواصل الأولى" value={companySettings.contact1Name} onChange={v=>updateCompanyField('contact1Name',v)}/><Field label="هاتف جهة التواصل الأولى" value={companySettings.contact1Phone} onChange={v=>updateCompanyField('contact1Phone',v)}/><Field label="اسم جهة التواصل الثانية" value={companySettings.contact2Name} onChange={v=>updateCompanyField('contact2Name',v)}/><Field label="هاتف جهة التواصل الثانية" value={companySettings.contact2Phone} onChange={v=>updateCompanyField('contact2Phone',v)}/></div><div className="panel-head" style={{marginTop:18}}><div><h3>شعار المستندات</h3><p>اختياري: صورة PNG أو JPG أو WebP حتى 5 ميجابايت. الشعار لا يظهر في واجهة البرنامج.</p></div>{companySettings.logoDataUrl&&<img src={companySettings.logoDataUrl} alt="معاينة شعار الفواتير" style={{maxWidth:120,maxHeight:70,objectFit:'contain'}}/>}</div><div className="backup-actions"><label className="secondary-button" style={{cursor:'pointer'}}>اختيار شعار<input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={event=>void importCompanyLogo(event)}/></label>{companySettings.logoDataUrl&&<button className="secondary-btn" onClick={()=>setCompanySettings(old=>({...old,logoDataUrl:undefined}))}>إعادة الشعار الأصلي</button>}</div><div className="panel" style={{marginTop:20}}><h3>الحفظ والنسخ الاحتياطي</h3><p>المسودات محفوظة تلقائيًا على هذا الجهاز. قاعدة بيانات التطبيق تنشئ نسخة استرداد محلية كل 30 دقيقة وتحتفظ بآخر 24 نسخة. استخدم تنزيل نسخة JSON لحفظ نسخة خارج الجهاز.</p></div><div className="modal-actions"><span className="muted">تُحفظ إعدادات الشركة تلقائيًا مع بيانات البرنامج.</span></div></section>
+        )}
       </main>
+
+      {stocktakeOpen && (
+        <div className="modal-backdrop" onClick={() => setStocktakeOpen(false)}>
+          <section className="modal wide" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div className="modal-head"><div><h2>جرد المخزون</h2><p>أدخل الكمية الفعلية؛ ستظهر التسويات في سجل حركة المخزون بعد التأكيد.</p></div><button className="icon-btn" onClick={() => setStocktakeOpen(false)} aria-label="إغلاق"><X /></button></div>
+            <div className="table-wrap"><table><thead><tr><th>الصنف</th><th>الكود</th><th>المسجل بالنظام</th><th>الكمية الفعلية</th><th>الفرق</th></tr></thead><tbody>{products.map(product => { const counted = Number(stocktakeCounts[product.id]); const difference = (Number.isFinite(counted) ? counted : product.quantity) - product.quantity; return <tr key={product.id}><td>{product.name}</td><td>{product.code}</td><td>{product.quantity}</td><td><input aria-label={'الكمية الفعلية ' + product.name} type="number" min="0" step="1" value={stocktakeCounts[product.id] ?? product.quantity} onChange={e => setStocktakeCounts(old => ({ ...old, [product.id]: e.target.value }))} /></td><td className={difference < 0 ? 'text-danger' : ''}>{difference > 0 ? '+' : ''}{difference}</td></tr> })}</tbody></table></div>
+            <div className="modal-actions"><button className="secondary-btn" onClick={() => setStocktakeOpen(false)}>إلغاء</button><button className="primary-btn" onClick={saveStocktake}><Check size={16}/> اعتماد الجرد</button></div>
+          </section>
+        </div>
+      )}
 
       {stockMovementModal && (
         <div className="modal-backdrop" onClick={() => setStockMovementModal(false)}>
@@ -1736,8 +2235,6 @@ function InventoryApp({ user }: { user: AppUser }) {
                 </h2>
                 <p>املأ بيانات الصنف الأساسية</p>
               </div>
-              {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
-
               <button
                 className="icon-btn"
                 onClick={() => setProductModal(null)}
@@ -1745,6 +2242,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 <X />
               </button>
             </div>
+            {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
 
             <div className="form-grid">
               <Field
@@ -1795,6 +2293,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 value={draft.minStock}
                 onChange={v => setDraft({ ...draft, minStock: v })}
               />
+              <Field label="المخزون المستهدف بعد الشراء" type="number" value={draft.targetStock} onChange={v => setDraft({ ...draft, targetStock: v })} />
             </div>
 
             <div className="modal-actions">
@@ -1842,6 +2341,7 @@ function InventoryApp({ user }: { user: AppUser }) {
               onChange={setCustomer}
               placeholder="اسم العميل أو الشركة"
             />
+            <div className="form-grid"><Field label="رقم هاتف العميل" value={quotePhone} onChange={setQuotePhone} placeholder="01xxxxxxxxx" /><Field label="موعد متابعة العرض (اختياري)" type="date" value={quoteFollowUpDate} onChange={setQuoteFollowUpDate} /></div>
 
             <div className="pick-products">
               <h4>إضافة أصناف</h4>
@@ -1894,7 +2394,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                       }
                     />
 
-                    <strong>{money(row.quantity * row.price)}</strong>
+                    <strong>{money(lineTotalFor(row))}</strong>
 
                     <button
                       className="icon-btn delete"
@@ -1933,9 +2433,9 @@ function InventoryApp({ user }: { user: AppUser }) {
       )}
 
       {invoiceModal && (
-        <div className="modal-backdrop" onClick={() => setInvoiceModal(false)}>
+        <div className="modal-backdrop" onClick={closeInvoiceModal}>
           <section className="modal wide" onClick={e => e.stopPropagation()}>
-            <div className="modal-head"><div><h2>إنشاء فاتورة جديدة</h2><p>فاتورة بيع رسمية قابلة للطباعة أو الحفظ PDF</p></div><button className="icon-btn" onClick={() => setInvoiceModal(false)}><X /></button></div>
+            <div className="modal-head"><div><h2>{convertingQuoteId ? 'تحويل عرض السعر إلى فاتورة' : 'إنشاء فاتورة جديدة'}</h2><p>{convertingQuoteId ? 'راجع بيانات العميل والكميات والمخزون والإجمالي قبل اعتماد الفاتورة.' : 'فاتورة بيع رسمية قابلة للطباعة أو الحفظ PDF'}</p></div><button className="icon-btn" onClick={closeInvoiceModal}><X /></button></div>
             {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
             <div className="form-grid">
               <Field label="اسم العميل / الشركة *" value={invoiceCustomer} onChange={setInvoiceCustomer} placeholder="اسم العميل" />
@@ -1946,11 +2446,11 @@ function InventoryApp({ user }: { user: AppUser }) {
               <Field label="المبلغ المدفوع (جنيه)" type="number" value={invoicePaid} onChange={v => {setInvoicePaid(v); setInvoiceStatus(Number(v) > 0 ? 'partial' : 'unpaid')}} />
             </div>
             <div className="pick-products"><h4>اختار الأصناف</h4>{products.map(p => <button className="pick-row" key={p.id} onClick={() => addQuoteRow(p)}><span><b>{p.name}</b><small>{p.code} · {money(p.price)} للوحدة · المتاح {p.quantity}</small></span><Plus size={18} /></button>)}</div>
-            {quoteRows.length > 0 && <div className="quote-draft"><h4>تفاصيل الفاتورة</h4>{quoteRows.map(row => <div className="draft-row" key={row.productId}><span>{row.name}<small>{money(row.price)} للوحدة</small></span><input aria-label="الكمية" type="number" min="1" value={row.quantity} onChange={e => setQuoteRows(old => old.map(x => x.productId === row.productId ? {...x, quantity: Math.max(1, Number(e.target.value) || 1)} : x))} /><strong>{money(row.quantity * row.price)}</strong><button className="icon-btn delete" onClick={() => setQuoteRows(old => old.filter(x => x.productId !== row.productId))}><X size={16} /></button></div>)}
+            {quoteRows.length > 0 && <div className="quote-draft"><h4>تفاصيل الفاتورة</h4>{quoteRows.map(row => <div className="draft-row" key={row.productId}><span>{row.name}<small>{money(row.price)} للوحدة</small></span><input aria-label="الكمية" type="number" min="1" value={row.quantity} onChange={e => setQuoteRows(old => old.map(x => x.productId === row.productId ? {...x, quantity: Math.max(1, Number(e.target.value) || 1)} : x))} /><strong>{money(lineTotalFor(row))}</strong><button className="icon-btn delete" onClick={() => setQuoteRows(old => old.filter(x => x.productId !== row.productId))}><X size={16} /></button></div>)}
               <Field label="ملاحظات الفاتورة" value={invoiceNotes} onChange={setInvoiceNotes} placeholder="طريقة التسليم أو أي ملاحظات" />
-              <div className="invoice-summary"><div><span>إجمالي الأصناف</span><b>{money(invoiceSubtotal)}</b></div><div><span>الخصم</span><b>{money(invoiceDiscountValue)}</b></div><div><span>الضريبة</span><b>{money(Math.max(0, invoiceSubtotal - invoiceDiscountValue) * invoiceTaxValue / 100)}</b></div><div className="total-row"><span>الإجمالي النهائي</span><strong>{money(invoiceTotal)}</strong></div><div><span>المتبقي للتحصيل</span><b>{money(invoiceBalance)}</b></div></div>
+              <div className="invoice-summary"><div><span>إجمالي الأصناف</span><b>{money(invoiceSubtotal)}</b></div><div><span>الخصم</span><b>{money(invoiceDiscountValue)}</b></div><div><span>الضريبة</span><b>{money(invoiceTaxFor(invoiceSubtotal, invoiceDiscountValue, invoiceTaxValue))}</b></div><div className="total-row"><span>الإجمالي النهائي</span><strong>{money(invoiceTotal)}</strong></div><div><span>المتبقي للتحصيل</span><b>{money(invoiceBalance)}</b></div></div>
             </div>}
-            <div className="modal-actions"><button className="secondary-btn" onClick={() => setInvoiceModal(false)}>إلغاء</button><button className="primary-btn" onClick={saveInvoice}><Check size={17} /> حفظ الفاتورة</button></div>
+            <div className="modal-actions"><button className="secondary-btn" onClick={closeInvoiceModal}>إلغاء</button><button className="primary-btn" onClick={saveInvoice}><Check size={17} /> حفظ الفاتورة</button></div>
           </section>
         </div>
       )}
@@ -1980,7 +2480,7 @@ function InventoryApp({ user }: { user: AppUser }) {
 
       <footer className="footer">
         <span>
-          © {new Date().getFullYear()} {COMPANY}
+          © {new Date().getFullYear()} {companySettings.name}
         </span>
         <span>
           <ClipboardList size={14} /> إدارة مخزون ومستلزمات التأريض
@@ -2053,102 +2553,89 @@ function Field({
   )
 }
 
-function quoteHtml(q: Quote) {
-  const subtotal = q.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+function quoteHtml(q: Quote, settings: CompanySettings = DEFAULT_COMPANY_SETTINGS) {
+  const subtotal = itemsSubtotalFor(q.items)
   const dateLabel = new Date(q.date + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
-  const logoUrl = 'https://i.ibb.co/yB5yr1BD/IMG-5095.jpg'
-  const rows = q.items.map((item, index) =>
-    '<tr><td class="center">' + (index + 1) + '</td><td><span class="code">' + escapeHtml(item.code) + '</span></td><td class="item">' + escapeHtml(item.name) + '</td><td class="center">' + item.quantity + '</td><td class="money">' + item.price.toFixed(2) + ' ج.م</td><td class="money">' + (item.quantity * item.price).toFixed(2) + ' ج.م</td></tr>'
-  ).join('')
-  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>عرض سعر ' + escapeHtml(q.number) + '</title><style>' +
-  ':root{--navy:#102d46;--blue:#1c5d83;--gold:#c99d48;--ink:#1c2f40;--muted:#617487;--line:#d7e1e9;--pale:#f2f6f9}' +
-  '*{box-sizing:border-box}html{background:#edf1f5}body{margin:0;padding:24px;background:#edf1f5;color:var(--ink);font:13px/1.7 Tahoma,Arial,sans-serif}.actions{max-width:900px;margin:0 auto 14px;display:flex;gap:8px;justify-content:flex-end}.actions button{border:0;border-radius:8px;padding:11px 18px;background:var(--navy);color:#fff;font:inherit;font-weight:bold;cursor:pointer}.actions .secondary{background:#fff;color:var(--navy);border:1px solid var(--line)}' +
-  '.sheet{max-width:900px;min-height:1120px;margin:auto;background:#fff;position:relative;overflow:hidden;box-shadow:0 18px 55px #102d4620;border:1px solid #e1e8ee}.top-stripe{height:7px;background:linear-gradient(90deg,var(--navy) 0%,var(--blue) 72%,var(--gold) 100%)}.header{padding:28px 34px 23px;display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:15px;min-width:0}.logo{width:90px;height:78px;object-fit:contain}.company{font-size:21px;line-height:1.5;font-weight:800;color:var(--navy);margin:0}.subtitle{font-size:10px;letter-spacing:.5px;color:var(--muted)}.tagline{font-size:11px;color:var(--blue);margin-top:5px}.doc-chip{background:#fff;color:var(--navy);border:2px solid var(--navy);border-radius:0;padding:10px 18px;text-align:center;min-width:150px;box-shadow:none}.doc-chip strong{display:block;font-size:23px;line-height:1.4}.doc-chip span{font-size:10px;letter-spacing:1.4px;color:var(--muted)}' +
-  '.intro{padding:25px 34px 15px;display:flex;align-items:end;justify-content:space-between;gap:15px}.intro h2{margin:0;color:var(--navy);font-size:26px;display:inline-block;border-right:4px solid var(--gold);padding-right:12px;letter-spacing:-.3px}.intro p{margin:5px 0 0;color:var(--muted);font-size:12px}.number{text-align:left;color:var(--muted);font-size:11px}.number b{display:block;color:var(--blue);font-size:16px;direction:ltr;border:1px solid var(--line);background:var(--pale);padding:5px 10px;margin-top:4px;letter-spacing:.5px}.details{padding:0 34px 20px;display:grid;grid-template-columns:1fr 1fr;gap:13px}.detail{background:linear-gradient(135deg,#f4f8fb,#edf3f7);border:1px solid #dce6ed;border-right:3px solid var(--blue);border-radius:3px;padding:15px 17px}.detail h3{margin:0 0 9px;font-size:12px;color:var(--blue)}.detail-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #dbe5ed}.detail-row:last-child{border-bottom:0}.detail-row span{color:var(--muted)}.detail-row b{color:var(--navy);text-align:left;overflow-wrap:anywhere}' +
-  '.table-wrap{padding:0 34px}table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px;border:1px solid var(--line);border-radius:4px;overflow:hidden}thead{display:table-header-group}th{background:linear-gradient(110deg,var(--navy),var(--blue));color:#fff;text-align:right;padding:13px 10px;font-weight:700;letter-spacing:.1px}td{padding:12px 9px;border-bottom:1px solid var(--line);background:#fff}tbody tr:nth-child(even) td{background:#f3f7fa}tbody tr:last-child td{border-bottom:0}tbody tr:hover td{background:#edf4f8}.center{text-align:center;white-space:nowrap}.money{white-space:nowrap;font-variant-numeric:tabular-nums}.code{direction:ltr;display:inline-block;color:var(--blue);font-size:10px;font-weight:bold}.item{font-weight:700}' +
-  '.lower{padding:20px 34px 0;display:grid;grid-template-columns:1fr 1.08fr;gap:18px;align-items:stretch}.notes,.totals{border:1px solid var(--line);border-radius:4px;overflow:hidden}.notes{background:linear-gradient(145deg,#f8fafc,#eef3f7);padding:16px;border-top:3px solid var(--gold)}.notes h3{margin:0 0 9px;color:var(--navy);font-size:14px}.notes p{margin:0 0 7px;color:var(--muted);font-size:11px}.notes ul{margin:8px 0 0;padding-right:18px;color:var(--ink);font-size:11px}.totals{padding:8px 15px}.sum-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #e8eef3}.sum-row span{color:var(--muted)}.sum-row b{white-space:nowrap;font-variant-numeric:tabular-nums}.sum-row.final{margin:8px -8px -1px;padding:15px 12px;background:linear-gradient(110deg,var(--navy),var(--blue));color:#fff;border-radius:2px}.sum-row.final span,.sum-row.final b{color:#fff;font-size:15px;font-weight:800}.terms{padding:18px 34px 0;font-size:10px;color:var(--muted);line-height:1.9;border-top:1px solid var(--line);margin:18px 34px 0}.terms strong{color:var(--navy)}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;padding:35px 55px 28px}.sign{border-top:1px dashed #8da2b3;text-align:center;padding-top:9px;color:var(--navy);font-size:11px;font-weight:bold;min-height:43px}.footer{background:linear-gradient(110deg,var(--navy),#174866);color:#eaf2f8;padding:17px 34px;display:flex;justify-content:space-between;align-items:center;gap:15px;font-size:10px;border-top:3px solid var(--gold)}.footer strong{color:#fff;font-size:12px}.footer .motto{color:#f0c66e;font-size:12px;font-weight:bold}' +
-  '@page{size:A4;margin:10mm}@media print{html,body{background:#fff;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{max-width:none;min-height:0;box-shadow:none}.header,.details,.table-wrap,.lower,.terms,.signatures{break-inside:avoid}.footer{break-inside:avoid}}@media(max-width:620px){body{padding:8px}.header{padding:20px 16px;align-items:flex-start;flex-direction:column}.logo{width:65px;height:62px}.company{font-size:16px}.doc-chip{align-self:flex-end}.intro{padding:20px 16px 12px}.intro h2{font-size:22px}.details{padding:0 16px 16px;grid-template-columns:1fr}.table-wrap{padding:0 10px;overflow-x:auto}table{min-width:570px}.lower{padding:16px;grid-template-columns:1fr}.terms{padding:12px 16px 0}.signatures{padding:28px 22px;gap:25px}.footer{padding:15px;flex-wrap:wrap}}' +
-  '</style></head><body><div class="actions"><button onclick="window.print()">طباعة عرض السعر / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
-  '<main class="sheet"><div class="top-stripe"></div><header class="header"><div class="brand"><img class="logo" src="' + logoUrl + '" alt="شعار العربي" onerror="this.style.display=\'none\'"><div><h1 class="company">' + COMPANY + '</h1><div class="subtitle">EARTHING &amp; LIGHTNING PROTECTION</div><div class="tagline">أمان · حماية · استمرارية</div></div></div><div class="doc-chip"><strong>عرض سعر</strong><span>QUOTATION</span></div></header>' +
-  '<section class="intro"><div><h2>عرض سعر</h2><p>نشكركم على اهتمامكم بالتعامل معنا، ويسعدنا تقديم عرض السعر التالي.</p></div><div class="number">رقم العرض<b>' + escapeHtml(q.number) + '</b></div></section>' +
-  '<section class="details"><div class="detail"><h3>بيانات العميل</h3><div class="detail-row"><span>اسم العميل / الشركة</span><b>' + escapeHtml(q.customer) + '</b></div><div class="detail-row"><span>رقم الهاتف</span><b>—</b></div><div class="detail-row"><span>العنوان</span><b>—</b></div><div class="detail-row"><span>تاريخ العرض</span><b>' + dateLabel + '</b></div></div><div class="detail"><h3>بيانات العرض</h3><div class="detail-row"><span>رقم العرض</span><b>' + escapeHtml(q.number) + '</b></div><div class="detail-row"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="detail-row"><span>مدة الصلاحية</span><b>7 أيام</b></div><div class="detail-row"><span>طريقة الدفع</span><b>نقدًا / تحويل بنكي</b></div></div></section>' +
-  '<div class="table-wrap"><table><thead><tr><th class="center">م</th><th>كود الصنف</th><th>الصنف / الوصف</th><th class="center">الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-  '<section class="lower"><div class="notes"><h3>ملاحظات وشروط</h3><p>يرجى مراجعة تفاصيل الأصناف والكميات والأسعار قبل اعتماد العرض.</p><ul><li>الأسعار تشمل التوريد فقط ما لم يُذكر خلاف ذلك.</li><li>مدة التوريد حسب التوفر في المخزون.</li><li>الضمان حسب شروط الشركة المصنعة.</li><li>هذا العرض ساري لمدة 7 أيام من تاريخ الإصدار.</li></ul></div><div class="totals"><div class="sum-row"><span>إجمالي المبلغ قبل الخصم</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div><div class="sum-row"><span>الخصم</span><b>0.00 ج.م</b></div><div class="sum-row"><span>إجمالي المبلغ بعد الخصم</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div><div class="sum-row"><span>الضريبة (0%)</span><b>0.00 ج.م</b></div><div class="sum-row final"><span>المبلغ الإجمالي</span><b>' + subtotal.toFixed(2) + ' ج.م</b></div></div></section>' +
-  '<div class="terms"><strong>تنويه:</strong> يتم اعتماد الطلب بعد موافقة العميل على الكميات والأسعار وشروط التوريد.</div><section class="signatures"><div class="sign">توقيع العميل</div><div class="sign">إدارة الشركة / الختم</div></section><footer class="footer"><div><strong>' + COMPANY + '</strong><br>القليوبية - مصر</div><div>للاستفسار وطلب الأسعار<br>01012345678</div><div>البريد الإلكتروني<br>info@alarabi-eg.com</div><div class="motto">معاً نحو بيئة أكثر أماناً</div></footer></main></body></html>'
+  const rows = q.items.length ? q.items.map((item, index) =>
+    '<tr><td class="cell-num">' + (index + 1) + '</td><td class="ltr">' + escapeHtml(item.code) + '</td><td><strong class="line-name">' + escapeHtml(item.name) + '</strong></td><td class="cell-num">' + item.quantity + '</td><td class="cell-money">' + money(item.price) + '</td><td class="cell-money">' + money(lineTotalFor(item)) + '</td></tr>'
+  ).join('') : '<tr><td class="empty-row" colspan="6">لا توجد أصناف في العرض.</td></tr>'
+  return documentFrame('عرض سعر', 'QUOTATION', q.number, dateLabel,
+    '<div class="party-card"><h3>بيانات العميل</h3><div class="party-line"><span>اسم العميل / الشركة</span><b>' + escapeHtml(q.customer) + '</b></div><div class="party-line"><span>رقم الهاتف</span><b>' + escapeHtml(q.phone || '—') + '</b></div><div class="party-line"><span>العنوان</span><b>—</b></div><div class="party-line"><span>تاريخ العرض</span><b>' + dateLabel + '</b></div></div>' +
+    '<div class="party-card"><h3>بيانات العرض</h3><div class="party-line"><span>رقم العرض</span><b class="ltr">' + escapeHtml(q.number) + '</b></div><div class="party-line"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="party-line"><span>ساري حتى</span><b>' + escapeHtml(q.validUntil || '7 أيام من تاريخ الإصدار') + '</b></div><div class="party-line"><span>طريقة الدفع</span><b>نقدًا / تحويل بنكي</b></div></div>',
+    '<p class="doc-intro">نشكركم على اهتمامكم بالتعامل معنا، ويسعدنا تقديم عرض السعر التالي.</p><table class="items"><thead><tr><th class="cell-num">م</th><th>كود الصنف</th><th>الصنف / الوصف</th><th class="cell-num">الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<section class="totals-area"><div class="notes-box"><h3>ملاحظات وشروط</h3><p>يرجى مراجعة تفاصيل الأصناف والكميات والأسعار قبل اعتماد العرض.</p><ul><li>الأسعار تشمل التوريد فقط ما لم يُذكر خلاف ذلك.</li><li>مدة التوريد حسب التوفر في المخزون.</li><li>الضمان حسب شروط الشركة المصنعة.</li><li>هذا العرض ساري لمدة 7 أيام من تاريخ الإصدار.</li></ul></div><div class="totals-box"><div class="total-line"><span>إجمالي المبلغ قبل الخصم</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(0) + '</b></div><div class="total-line"><span>إجمالي المبلغ بعد الخصم</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الضريبة (0%)</span><b>' + money(0) + '</b></div><div class="total-line total-grand"><span>المبلغ الإجمالي</span><b>' + money(subtotal) + '</b></div></div></section><div class="terms"><strong>تنويه:</strong> يتم اعتماد الطلب بعد موافقة العميل على الكميات والأسعار وشروط التوريد.</div>' +
+    '<section class="signatures"><div>توقيع المشتري</div><div>توقيع وختم المؤسسة</div></section>', settings)
 }
+
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c =>
-    ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    })[c] as string
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
   )
 }
 
 function invoiceTotalFor(invoice: Invoice) {
-  const subtotal = invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
-  return Math.max(0, subtotal - invoice.discount) * (1 + invoice.tax / 100)
+  const subtotal = itemsSubtotalFor(invoice.items)
+  return invoiceGrandTotalFor(subtotal, roundMoney(invoice.discount || 0), invoice.tax || 0)
 }
 
-function invoiceHtml(invoice: Invoice) {
-  const subtotal = invoice.items.reduce((sum, item) => sum + item.quantity * item.price, 0)
+function invoiceHtml(invoice: Invoice, settings: CompanySettings = DEFAULT_COMPANY_SETTINGS) {
+  const subtotal = itemsSubtotalFor(invoice.items)
   const total = invoiceTotalFor(invoice)
-  const balance = Math.max(0, total - invoice.paidAmount)
-  const taxAmount = Math.max(0, subtotal - invoice.discount) * invoice.tax / 100
-  const statusLabel = invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'
+  const balance = roundMoney(Math.max(0, total - invoice.paidAmount))
+  const taxAmount = invoiceTaxFor(subtotal, invoice.discount, invoice.tax)
   const dateLabel = new Date(invoice.date + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
   const dueDateLabel = invoice.dueDate
     ? new Date(invoice.dueDate + 'T12:00:00').toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })
     : '—'
-  const logoUrl = 'https://i.ibb.co/yB5yr1BD/IMG-5095.jpg'
-  const rows = invoice.items.map((item, index) =>
-    '<tr><td class="num">' + (index + 1) + '</td><td><span class="item-code">' + escapeHtml(item.code) + '</span></td><td><div class="item-name">' + escapeHtml(item.name) + '</div></td><td class="num">' + item.quantity + '</td><td class="amount">' + money(item.price) + '</td><td class="amount">' + money(item.quantity * item.price) + '</td></tr>'
-  ).join('')
-  const noteHtml = invoice.notes
-    ? '<p>' + escapeHtml(invoice.notes) + '</p>'
-    : '<p class="notes-empty">لا توجد ملاحظات مضافة.</p>'
-  const statusColor = invoice.status === 'paid' ? '#e8f5ed' : invoice.status === 'partial' ? '#fff3dd' : '#fcebea'
-  const statusTextColor = invoice.status === 'paid' ? '#26744d' : invoice.status === 'partial' ? '#8c641c' : '#a23e39'
-  return '<!doctype html>' +
-'<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-'<title>فاتورة ' + escapeHtml(invoice.number) + ' — ' + INVOICE_COMPANY + '</title><style>' +
-':root{--navy:#173653;--blue:#245b80;--pale:#eef4f8;--line:#d9e2e9;--ink:#253746;--muted:#647787}' +
-'*{box-sizing:border-box}html{background:#eef1f4}body{font-family:Tahoma,Arial,sans-serif;color:var(--ink);margin:0;padding:28px;background:#eef1f4;font-size:13px;line-height:1.7}' +
-'.sheet{width:100%;max-width:850px;min-height:1050px;margin:0 auto;background:#fff;padding:42px 46px;box-shadow:0 18px 55px rgba(20,43,61,.14);border:1px solid #e1e8ee;position:relative;overflow:hidden}' +
-'.accent{height:7px;background:linear-gradient(90deg,#173653 0%,#245b80 72%,#c6a66b 100%);position:absolute;top:0;right:0;left:0}' +
-'.head{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:8px 0 24px;border-bottom:1px solid var(--line)}.brand-lockup{display:flex;align-items:center;gap:16px;min-width:0}.company-logo{width:104px;height:86px;object-fit:contain;flex-shrink:0}' +
-'.company-name{font-size:22px;line-height:1.55;font-weight:800;color:var(--navy);margin:0}.company-sub{font-size:11px;color:var(--muted);letter-spacing:.4px}.doc-badge{min-width:145px;text-align:center;background:var(--pale);border:1px solid #dce7ee;border-radius:10px;padding:12px 16px}.doc-badge strong{display:block;font-size:20px;color:var(--navy)}.doc-badge span{font-size:11px;color:var(--muted)}' +
-'.title-row{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin:27px 0 18px;padding-right:12px;border-right:4px solid #c6a66b}h2{font-size:23px;color:var(--navy);margin:0}.invoice-no{font-size:12px;color:var(--muted)}.invoice-no b{color:var(--blue);font-size:15px;direction:ltr;display:inline-block}' +
-'.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 24px}.detail-card{border:1px solid var(--line);border-radius:9px;padding:13px 15px;min-width:0}.detail-card h3{margin:0 0 7px;font-size:11px;color:var(--muted);font-weight:700}.detail-card .value{font-size:14px;font-weight:700;color:var(--navy);overflow-wrap:anywhere}.detail-card .subvalue{font-size:11px;color:var(--muted);margin-top:3px}.section-title{font-size:13px;color:var(--navy);font-weight:800;margin:0 0 9px}' +
-'table{width:100%;border-collapse:separate;border-spacing:0;margin-top:8px;font-size:12px}thead{display:table-header-group}th{background:linear-gradient(110deg,var(--navy),var(--blue));color:#fff;font-weight:700;padding:13px 10px;text-align:right;white-space:nowrap;letter-spacing:.15px}th:first-child{border-radius:0 7px 0 0}th:last-child{border-radius:7px 0 0 0}td{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}tbody tr:nth-child(even) td{background:#f8fafb}.num{text-align:center;width:38px;color:var(--muted)}.amount{white-space:nowrap;font-variant-numeric:tabular-nums}.item-name{font-weight:700;color:var(--ink)}.item-code{font-size:10px;color:var(--muted);direction:ltr;display:inline-block}' +
-'.bottom-grid{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:24px;align-items:start;margin-top:23px}.notes{border:1px solid var(--line);border-radius:9px;padding:13px 14px;min-height:94px}.notes h3{margin:0 0 6px;font-size:12px;color:var(--navy)}.notes p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}.notes-empty{color:#8a99a5;font-size:11px}' +
-'.totals{border:1px solid var(--line);border-radius:10px;padding:8px 13px}.total-line{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #edf1f4}.total-line:last-child{border-bottom:0}.total-line span{color:var(--muted)}.total-line b{font-weight:700;color:var(--ink);white-space:nowrap}.total-line.grand{margin:4px -5px;padding:12px 8px;background:var(--pale);border-radius:7px}.total-line.grand span,.total-line.grand b{color:var(--navy);font-weight:800;font-size:15px}.total-line.balance b{color:' + (balance > 0 ? '#9b5b22' : '#26744d') + '}' +
-'.status{display:inline-block;border-radius:3px;padding:4px 11px;font-size:11px;font-weight:700;border:1px solid currentColor;background:' + statusColor + ';color:' + statusTextColor + '}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:45px;margin-top:42px}.signature{text-align:center;padding-top:12px;border-top:1px dashed #9cabb7;color:var(--muted);font-size:11px}.footer{margin-top:36px;padding-top:13px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:10px}.footer strong{display:block;color:var(--navy);font-size:12px;margin-bottom:3px}' +
-'.actions{max-width:850px;margin:0 auto 14px;display:flex;justify-content:flex-end;gap:8px}.actions button{font:inherit;border:0;border-radius:7px;padding:10px 16px;cursor:pointer;background:var(--navy);color:white}.actions .secondary{background:white;color:var(--navy);border:1px solid var(--line)}' +
-'@page{size:A4;margin:12mm}@media print{html,body{background:#fff;padding:0;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{width:100%;max-width:none;min-height:0;margin:0;padding:8mm 7mm;box-shadow:none;overflow:visible}.head,.details,.bottom-grid,.signatures,.footer{break-inside:avoid}tr{break-inside:avoid}}' +
-'@media(max-width:600px){body{padding:10px}.sheet{padding:28px 18px;min-height:0}.head{align-items:flex-start;flex-direction:column}.brand-lockup{gap:10px}.company-logo{width:72px;height:66px}.company-name{font-size:17px}.doc-badge{align-self:flex-end}.details{grid-template-columns:1fr 1fr;gap:7px}.detail-card{padding:10px}.bottom-grid{grid-template-columns:1fr}.signatures{gap:20px}table{font-size:10px}th,td{padding:8px 5px}}' +
-'</style></head><body><div class="actions"><button onclick="window.print()">طباعة الفاتورة / حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
-'<main class="sheet"><div class="accent"></div><header class="head"><div class="brand-lockup"><img class="company-logo" src="' + logoUrl + '" alt="لوجو شركة العربي" onerror="this.style.display=\'none\'"><div><h1 class="company-name">' + INVOICE_COMPANY + '</h1><div class="company-sub">EARTHING SYSTEMS</div></div></div><div class="doc-badge"><strong>فاتورة بيع</strong><span>INVOICE</span></div></header>' +
-'<section class="title-row"><h2>فاتورة بيع</h2><div class="invoice-no">رقم الفاتورة<br><b>' + escapeHtml(invoice.number) + '</b></div></section>' +
-'<section class="details"><div class="detail-card"><h3>بيانات العميل</h3><div class="value">' + escapeHtml(invoice.customer) + '</div><div class="subvalue">رقم الهاتف: ' + escapeHtml(invoice.phone || 'غير مسجل') + '</div></div>' +
-'<div class="detail-card"><h3>بيانات الفاتورة</h3><div class="value">' + dateLabel + '</div><div class="subvalue">تاريخ الاستحقاق: ' + dueDateLabel + '</div><div class="subvalue">حالة السداد: <span class="status">' + statusLabel + '</span></div></div></section>' +
-'<h3 class="section-title">تفاصيل الأصناف</h3><table><thead><tr><th class="num">م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-'<section class="bottom-grid"><div class="notes"><h3>ملاحظات وشروط</h3>' + noteHtml + '</div><div class="totals">' +
-'<div class="total-line"><span>إجمالي الأصناف</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(invoice.discount) + '</b></div><div class="total-line"><span>الضريبة (' + invoice.tax + '%)</span><b>' + money(taxAmount) + '</b></div><div class="total-line grand"><span>الإجمالي النهائي</span><b>' + money(total) + '</b></div><div class="total-line"><span>المبلغ المدفوع</span><b>' + money(invoice.paidAmount) + '</b></div><div class="total-line balance"><span>المتبقي</span><b>' + money(balance) + '</b></div></div></section>' +
-'<section class="signatures"><div class="signature">توقيع العميل / المستلم</div><div class="signature">توقيع وختم الشركة</div></section><footer class="footer"><strong>' + INVOICE_COMPANY + '</strong>شكرًا لثقتكم بنا — نتطلع إلى استمرار التعاون معكم</footer></main></body></html>'
+  const statusLabel = invoice.status === 'paid' ? 'مدفوعة' : invoice.status === 'partial' ? 'مدفوعة جزئيًا' : 'غير مدفوعة'
+  const rows = invoice.items.length ? invoice.items.map((item, index) =>
+    '<tr><td class="cell-num">' + (index + 1) + '</td><td class="ltr">' + escapeHtml(item.code) + '</td><td><strong class="line-name">' + escapeHtml(item.name) + '</strong></td><td class="cell-num">' + item.quantity + '</td><td class="cell-money">' + money(item.price) + '</td><td class="cell-money">' + money(lineTotalFor(item)) + '</td></tr>'
+  ).join('') : '<tr><td class="empty-row" colspan="6">لا توجد أصناف في الفاتورة.</td></tr>'
+  const note = invoice.notes.trim() ? escapeHtml(invoice.notes) : '—'
+  return documentFrame('فاتورة بيع', 'SALES INVOICE', invoice.number, dateLabel,
+    '<div class="party-card"><h3>بيانات العميل</h3><div class="party-line"><span>اسم العميل / الشركة</span><b>' + escapeHtml(invoice.customer) + '</b></div><div class="party-line"><span>رقم الهاتف</span><b>' + escapeHtml(invoice.phone || 'غير مسجل') + '</b></div><div class="party-line"><span>العنوان</span><b>—</b></div></div>' +
+    '<div class="party-card"><h3>بيانات الفاتورة</h3><div class="party-line"><span>تاريخ الإصدار</span><b>' + dateLabel + '</b></div><div class="party-line"><span>تاريخ الاستحقاق</span><b>' + dueDateLabel + '</b></div><div class="party-line"><span>حالة السداد</span><b class="status-text status-' + invoice.status + '">' + statusLabel + '</b></div></div>',
+    '<table class="items"><thead><tr><th class="cell-num">م</th><th>كود الصنف</th><th>الوصف</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<section class="totals-area"><div class="notes-box"><h3>ملاحظات وشروط</h3><p>' + note + '</p></div><div class="totals-box"><div class="total-line"><span>إجمالي الأصناف</span><b>' + money(subtotal) + '</b></div><div class="total-line"><span>الخصم</span><b>' + money(invoice.discount) + '</b></div><div class="total-line"><span>الضريبة (' + invoice.tax + '%)</span><b>' + money(taxAmount) + '</b></div><div class="total-line total-grand"><span>الإجمالي النهائي</span><b>' + money(total) + '</b></div><div class="total-line"><span>المبلغ المدفوع</span><b>' + money(invoice.paidAmount) + '</b></div><div class="total-line"><span>المتبقي</span><b>' + money(balance) + '</b></div></div></section>' +
+    '<section class="signatures"><div>توقيع المشتري / المستلم</div><div>توقيع وختم المؤسسة</div></section>', settings)
+}
+
+function documentFrame(title: string, englishTitle: string, number: string, date: string, parties: string, content: string, settings: CompanySettings = DEFAULT_COMPANY_SETTINGS) {
+  const contactMarkup = '<div class="footer-company"><strong>' + escapeHtml(settings.name) + '</strong><span>' + escapeHtml(settings.address) + '</span></div><div class="footer-contact"><span>' + escapeHtml(settings.contact1Name) + ' · ' + escapeHtml(settings.contact1Phone) + '</span><span>' + escapeHtml(settings.contact2Name) + ' · ' + escapeHtml(settings.contact2Phone) + '</span><span class="footer-email">' + escapeHtml(settings.email) + '</span></div>'
+  const watermarkMarkup = settings.logoDataUrl ? '' : '<img class="watermark" src="' + alarabiWatermarkDataUrl + '" alt="" aria-hidden="true">'
+  const styles = [
+    ':root{--ink:#17191d;--orange:#ed5a20;--amber:#ff9d36;--line:#b9b9b9;--soft:#f2f2f2}',
+    '*{box-sizing:border-box}html{background:#e9eaec}body{margin:0;padding:18px;background:#e9eaec;color:var(--ink);font:700 14px/1.55 "Segoe UI",Tahoma,Arial,sans-serif;text-rendering:optimizeLegibility;font-synthesis:weight}',
+    '.actions{width:210mm;margin:0 auto 10px;display:flex;gap:8px;justify-content:flex-end}.actions button{min-height:38px;border:1px solid #292929;border-radius:5px;padding:9px 16px;background:#17191d;color:#fff;font:700 13px Tahoma,Arial;cursor:pointer}.actions button:first-child{background:linear-gradient(120deg,#e4481b,#ff8c28);border-color:#e4481b}.actions .secondary{background:#fff;color:#242424;border-color:#ccc}.actions button:focus-visible{outline:3px solid #ff9d36;outline-offset:2px}.actions button:hover{filter:brightness(1.08)}.actions button:active{opacity:.82}',
+    '.sheet{width:210mm;min-height:297mm;margin:0 auto;background:#fff;position:relative;isolation:isolate;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 12px 40px #0002}.watermark{position:absolute;z-index:0;width:158mm;height:122mm;object-fit:contain;top:89mm;left:26mm;opacity:.29;pointer-events:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}',
+    '.hero{height:43mm;flex:0 0 43mm;position:relative;z-index:2;display:grid;grid-template-columns:1fr 1.2fr 1fr;align-items:center;gap:5mm;padding:5mm 9mm;color:#fff;background:radial-gradient(ellipse at center,rgba(113,37,13,.5),transparent 45%),linear-gradient(115deg,#08090b,#191919 49%,#08090b);border-bottom:1.5mm solid var(--orange);overflow:hidden}.hero:before,.hero:after{content:"";position:absolute;top:-35%;height:170%;width:4mm;background:linear-gradient(180deg,#ff9a27,#e52d20,#ff8f24);opacity:.85;transform:skew(-24deg)}.hero:before{left:4mm}.hero:after{right:4mm}.hero-message{position:relative;z-index:1;font-size:16px;line-height:1.45;font-weight:800;color:#f7f5f3}.hero-message strong{display:block;font-size:20px;color:#ff7a23;font-weight:900}.hero-logo{position:relative;z-index:1;width:100%;height:35mm;object-fit:contain;mix-blend-mode:screen}.hero-company{position:relative;z-index:1;text-align:left;font-size:13px;line-height:1.45;font-weight:900;color:#fff}.hero-company span{display:block;margin-top:3px;color:#ff9b34;font-size:10px;font-weight:700}',
+    '.title-badge{position:relative;z-index:3;width:100mm;min-height:19mm;margin:-9mm auto 3mm;display:grid;place-content:center;text-align:center;color:#fff;background:linear-gradient(115deg,#111316,#28211b,#111316);border:1.2mm solid var(--orange);clip-path:polygon(5% 0,95% 0,100% 50%,95% 100%,5% 100%,0 50%);filter:drop-shadow(0 5px 6px #0005)}.title-badge strong{font-size:25px;line-height:1.25}.title-badge span{font-size:8px;letter-spacing:2px;color:#ffad57}',
+    '.paper-content{position:relative;z-index:1;flex:1;padding:0 12mm 7mm}.party-grid{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin:1mm 0 4mm}.party-card{min-height:33mm;border:1px solid #9c9c9c;background:rgba(255,255,255,.74)}.party-card h3{margin:0;padding:2.1mm 4mm;color:#fff;background:linear-gradient(100deg,#131416,#252525);border-right:1.3mm solid var(--orange);font-size:14px;font-weight:800}.party-line{min-height:8mm;display:flex;align-items:center;justify-content:space-between;gap:3mm;padding:1.3mm 3mm;border-bottom:1px solid #ddd}.party-line:last-child{border-bottom:0}.party-line span{color:#424242;font-size:12px;font-weight:700;white-space:nowrap}.party-line b{font-size:12px;font-weight:800;text-align:left;overflow-wrap:anywhere}.ltr{direction:ltr;unicode-bidi:embed;font-variant-numeric:tabular-nums}',
+    '.meta-row{display:grid;grid-template-columns:1fr 1fr;gap:5mm;margin-bottom:4mm}.meta-box{min-height:9mm;border:1px solid #888;display:flex;align-items:stretch;background:#fff}.meta-box strong{min-width:31mm;display:grid;place-items:center;padding:1mm 3mm;color:#fff;background:linear-gradient(100deg,#141517,#282828);border-right:1.3mm solid var(--orange);font-size:12px;font-weight:800}.meta-box span{flex:1;display:grid;place-items:center;font-size:12px;font-weight:800;direction:ltr}',
+    '.doc-intro{margin:0 0 3mm;font-size:13px;font-weight:700;color:#383838}.terms{margin-top:4mm;padding:2mm 3mm;border-right:1.2mm solid var(--orange);background:#f6f6f6;font-size:11px;font-weight:700}.terms strong{color:#c9471c}.status-text{padding:1mm 2.5mm;border-radius:3mm;font-weight:800}.status-paid{background:#e5f3e9;color:#237246}.status-partial{background:#fff2da;color:#8b641b}.status-unpaid{background:#fae7e5;color:#a23e39}.items{width:100%;border-collapse:collapse;border:1px solid #555;font-size:13px;font-weight:700;background:rgba(255,255,255,.76);font-variant-numeric:tabular-nums}.items thead{display:table-header-group}.items th{padding:2.8mm 2mm;color:#fff;text-align:right;background:linear-gradient(100deg,#111315,#282828);border-bottom:1mm solid var(--orange);font-size:13px;font-weight:800}.items th:first-child{width:8mm}.items th:nth-child(2){width:24mm}.items th:nth-child(4){width:16mm}.items th:nth-child(5),.items th:nth-child(6){width:27mm}.items td{padding:2.7mm 2mm;border:1px solid #bdbdbd;vertical-align:middle;font-weight:700}.items tbody tr:nth-child(even) td{background:rgba(245,245,245,.88)}.cell-num{text-align:center;white-space:nowrap;font-weight:800}.cell-money{white-space:nowrap;text-align:center;font-weight:800}.line-name{display:block;font-weight:800}.line-code{display:block;margin-top:1mm;color:#555;font-size:11px;font-weight:700;direction:ltr;text-align:right}.empty-row{text-align:center;color:#777;padding:9mm!important}',
+    '.totals-area{display:grid;grid-template-columns:1.1fr .9fr;gap:5mm;margin-top:5mm}.notes-box,.totals-box{border:1px solid #aaa;background:rgba(255,255,255,.8)}.notes-box h3{margin:0;padding:2mm 3mm;background:linear-gradient(100deg,#131416,#242424);color:#fff;border-right:1.3mm solid var(--orange);font-size:13px;font-weight:800}.notes-box p{margin:0;padding:2mm 3mm;border-bottom:1px solid #e1e1e1;font-size:12px;font-weight:700;white-space:pre-wrap;overflow-wrap:anywhere}.notes-box ul{margin:1mm 0;padding:0 5mm 0 2mm;font-size:11px;font-weight:700;line-height:1.7}.total-line{display:flex;justify-content:space-between;gap:4mm;padding:1.8mm 3mm;border-bottom:1px solid #ddd;font-size:12px;font-weight:700}.total-line b{white-space:nowrap;font-weight:800}.total-grand{background:#1b1b1b;color:#fff;border-right:1.4mm solid var(--orange);font-size:13px;font-weight:900;padding:2.5mm 3mm}.total-grand b{color:#ffb064;font-weight:900}',
+    '.signatures{display:grid;grid-template-columns:1fr 1fr;gap:16mm;margin-top:7mm}.signatures div{min-height:17mm;padding-top:9mm;border-top:1px solid #777;text-align:center;font-size:11px;font-weight:700}',
+    '.footer{position:relative;z-index:1;min-height:27mm;margin-top:auto;padding:5mm 12mm;display:grid;grid-template-columns:1.15fr 1fr;gap:5mm;align-items:center;color:#fff;background:linear-gradient(105deg,#101113,#282828);border-top:1.5mm solid var(--orange);font-size:11px;font-weight:700}.footer-company{display:grid;gap:2mm}.footer-company strong{font-size:13px;font-weight:900}.footer-contact{display:grid;grid-template-columns:1fr 1fr;gap:1.5mm 4mm;font-weight:700}.footer-email{grid-column:span 2;direction:ltr;text-align:right;color:#ffb064;font-weight:800}',
+    '@page{size:A4;margin:0}@media print{html,body{width:210mm;min-height:297mm;background:#fff;padding:0;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:none!important}.sheet{width:210mm;min-height:297mm;margin:0;box-shadow:none;overflow:visible;break-after:page}.sheet:last-of-type{break-after:auto}.watermark{position:fixed;top:89mm;left:26mm}.hero,.title-badge,.party-card h3,.items th,.total-grand,.footer{print-color-adjust:exact;-webkit-print-color-adjust:exact}thead{display:table-header-group}tr,.party-card,.totals-area,.signatures,.footer{break-inside:avoid}}',
+    '@media(max-width:800px){body{padding:8px}.actions{width:100%}.sheet{width:100%;min-height:0}.hero{height:auto;min-height:150px;grid-template-columns:.8fr 1.1fr .8fr;padding:12px 18px}.hero-message{font-size:12px}.hero-message strong{font-size:15px}.hero-logo{height:110px}.hero-company{font-size:11px}.hero-company span{font-size:8px}.paper-content{padding:0 18px 18px}.party-grid{gap:8px}.party-card h3{font-size:10px}.party-line{gap:4px;padding:5px}.party-line span,.party-line b{font-size:9px}.items{font-size:9px}.items th{font-size:9px;padding:8px 5px}.items td{padding:7px 5px}.totals-area{gap:8px}.notes-box p,.total-line{font-size:9px}.footer{padding:12px 18px;font-size:8px}}',
+    '@media(max-width:560px){.hero{grid-template-columns:1fr 1.3fr;min-height:132px}.hero-message{grid-column:1;grid-row:1}.hero-logo{grid-column:2;grid-row:1/3}.hero-company{grid-column:1;grid-row:2;text-align:right}.party-grid{grid-template-columns:1fr}.meta-row{gap:6px}.meta-box strong{min-width:27mm;font-size:9px}.totals-area{grid-template-columns:1fr}.footer{grid-template-columns:1fr}.footer-contact{grid-template-columns:1fr}.footer-email{grid-column:auto}.signatures{gap:8mm}}',
+  ].join('')
+  return '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + title + ' ' + escapeHtml(number) + ' — alarabisystem</title><style>' + styles + '</style></head><body>' +
+    '<div class="actions"><button onclick="window.print()">طباعة ' + title + '</button><button class="secondary" onclick="if(window.alarabiDesktop){window.alarabiDesktop.savePreviewPdf().then(result=>{if(result.ok)alert(\'تم حفظ ملف PDF بنجاح\')})}else{window.print()}">حفظ PDF</button><button class="secondary" onclick="window.close()">إغلاق</button></div>' +
+    '<main class="sheet">' + watermarkMarkup + '<header class="hero"><div class="hero-message">حماية اليوم<strong>لأمان الغد</strong></div><img class="hero-logo" src="' + (settings.logoDataUrl || alarabiLogoDataUrl) + '" alt="شعار المؤسسة"><div class="hero-company">' + escapeHtml(settings.name) + '<span>لأنظمة التأريض والحماية من الصواعق</span></div></header>' +
+    '<div class="title-badge"><strong>' + title + '</strong><span>' + englishTitle + '</span></div><div class="paper-content"><section class="party-grid">' + parties + '</section>' +
+    '<div class="meta-row"><div class="meta-box"><strong>رقم المستند</strong><span>' + escapeHtml(number) + '</span></div><div class="meta-box"><strong>التاريخ</strong><span>' + date + '</span></div></div>' + content +
+    '</div><footer class="footer">' + contactMarkup + '</footer></main></body></html>'
 }
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null)
   const [checking, setChecking] = useState(true)
   const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [guestBusy, setGuestBusy] = useState(false)
   useEffect(() => {
     if (isDesktopApp()) {
       let active = true
@@ -2164,36 +2651,44 @@ export default function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setBusy(true); setMessage('')
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      : await supabase.auth.signUp({ email: email.trim(), password })
-    setBusy(false)
-    if (result.error) setMessage(result.error.message)
-    else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
-    else setMessage('تم تسجيل الدخول بنجاح.')
-  }
-  const signInAsGuest = async () => {
-    setGuestBusy(true)
+    event.preventDefault()
+    if (busy) return
+    setBusy(true)
     setMessage('')
-    const { error } = await supabase.auth.signInAnonymously()
-    setGuestBusy(false)
-    if (error) setMessage('تعذر الدخول كزائر: ' + error.message)
+    try {
+      const result = mode === 'login'
+        ? await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        : await supabase.auth.signUp({ email: email.trim(), password, options: { data: { username: username.trim() } } })
+      if (result.error) setMessage(result.error.message)
+      else if (mode === 'signup' && !result.data.session) setMessage('تم إنشاء الحساب. راجع بريدك الإلكتروني لتأكيده، ثم سجّل الدخول.')
+      else setMessage('تم تسجيل الدخول بنجاح.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'حصل خطأ غير متوقع. حاول مرة أخرى.')
+    } finally {
+      setBusy(false)
+    }
   }
-  if (checking) return <div className="auth-page"><div className="auth-card">جارٍ التحقق من تسجيل الدخول...</div></div>
+  if (checking) return <BrandedLoadingScreen caption="جارٍ تجهيز alarabisystem" />
   if (user) return <InventoryApp user={user} />
   return <div className="auth-page" dir="rtl"><form className="auth-card" onSubmit={submit}>
-    <div className="auth-mark"><Boxes size={30} /></div>
-    <h1>العربي لأنظمة التأريض والحماية من الصواعق</h1>
-    <p>سجّل الدخول للوصول إلى المخزون والفواتير وعروض الأسعار من أي جهاز.</p>
-    <label>البريد الإلكتروني<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
-    <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="6 أحرف على الأقل" /></label>
+    <h1>مؤسسة العربي لأنظمة التأريض</h1>
+    <p>سجّل الدخول إلى alarabisystem لإدارة المخزون والفواتير وعروض الأسعار.</p>
+    {mode === 'signup' && <label>اسم المستخدم<input type="text" autoComplete="nickname" minLength={3} maxLength={40} required value={username} onChange={e => setUsername(e.target.value)} placeholder="اسم يظهر في حسابك" /></label>}
+    <label>البريد الإلكتروني<input type="email" autoComplete="email" maxLength={254} required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
+    <label>كلمة المرور<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} maxLength={256} required value={password} onChange={e => setPassword(e.target.value)} placeholder="8 أحرف على الأقل" /></label>
     {message && <div className="auth-message">{message}</div>}
-    <button className="primary-btn auth-submit" disabled={busy || guestBusy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
-    {mode === 'login' && <>
-      <div className="auth-divider"><span>أو</span></div>
-      <button type="button" className="guest-btn" disabled={busy || guestBusy} onClick={signInAsGuest}>{guestBusy ? 'جارٍ الدخول كزائر...' : 'الدخول كزائر بدون إيميل أو باسورد'}</button>
-    </>}
+    <button className="primary-btn auth-submit" disabled={busy}>{busy ? 'جارٍ التنفيذ...' : mode === 'login' ? 'تسجيل الدخول' : 'إنشاء حساب جديد'}</button>
     <button type="button" className="text-button auth-toggle" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? 'أول مرة؟ أنشئ حسابًا' : 'لديك حساب؟ سجّل الدخول'}</button>
   </form></div>
+}
+
+function BrandedLoadingScreen({ caption }: { caption: string }) {
+  return <main className="brand-loading" dir="rtl" aria-live="polite">
+    <div className="loading-orbit loading-orbit-one" />
+    <div className="loading-orbit loading-orbit-two" />
+    <div className="loading-core" aria-hidden="true"><span /></div>
+    <h1>alarabisystem</h1>
+    <p>{caption}</p>
+    <div className="loading-track"><span /></div>
+  </main>
 }

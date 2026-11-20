@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+electron*.zip
+electron45-part*.bin
+range-test.bin
+*.log
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal

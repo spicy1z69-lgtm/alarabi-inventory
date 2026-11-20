@@ -1,9 +1,9 @@
 name: Desktop build
 on:
   push:
-    branches: [desktop-offline-migration, feature/supplier-debts]
+    branches: [desktop-offline-migration, feature/supplier-debts, customer-release]
   pull_request:
-    branches: [desktop-offline-migration, feature/supplier-debts]
+    branches: [desktop-offline-migration, feature/supplier-debts, customer-release]
   workflow_dispatch:
 
 jobs:
