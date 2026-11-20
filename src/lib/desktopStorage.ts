@@ -19,6 +19,7 @@ declare global {
       printHtml: (html: string) => Promise<{ ok: boolean }>
       printPreview: () => Promise<{ ok: boolean; cancelled?: boolean }>
       savePreviewPdf: () => Promise<{ ok: boolean; savedAsPdf?: boolean; cancelled?: boolean; filePath?: string }>
+      openWhatsApp: (url: string) => Promise<{ ok: boolean }>
       onQuickSearchShortcut: (callback: () => void) => () => void
     }
   }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const Database = require('better-sqlite3')
@@ -301,68 +301,40 @@ function scheduleRecoveryBackups() {
 }
 
 async function createPrintPreview(event, documentInput) {
-  const ownerId = requireAuthenticated(event)
+  requireAuthenticated(event)
   const html = typeof documentInput === 'string' ? documentInput : documentInput?.html
   if (typeof html !== 'string' || html.length > 5_000_000) {
     throw new Error('بيانات المستند غير صالحة للطباعة. حدّث التطبيق ثم أعد المحاولة.')
   }
-
-  // This is a preview window inside the desktop app, not a native print dialog.
-  // The invoice remains viewable even when Windows has no printer installed.
-  const parent = BrowserWindow.fromWebContents(event.sender)
-  const previewHtml = html
-    .split('onclick="window.print()"').join("onclick=\"window.alarabiDesktop.printPreview().then(result => { if (!result.ok && !result.cancelled) alert('تعذرت الطباعة') }).catch(error => alert('تعذرت الطباعة: ' + error.message))\"")
-
-  const previewWindow = new BrowserWindow({
-    width: 1000,
-    height: 850,
-    minWidth: 760,
-    minHeight: 600,
-    show: true,
-    autoHideMenuBar: true,
-    parent: parent || undefined,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
-  // Permit only this child preview to use the authenticated PDF-save handler.
-  authenticatedContents.set(previewWindow.webContents.id, { ownerId, kind: 'preview' })
-  previewWindow.webContents.on('destroyed', () => authenticatedContents.delete(previewWindow.webContents.id))
-
-  try {
-    await previewWindow.loadURL('about:blank')
-    await previewWindow.webContents.executeJavaScript(
-      'document.open(); document.write(' + JSON.stringify(previewHtml) + '); document.close(); true',
-      true,
-    )
-    await previewWindow.webContents.executeJavaScript(`
-      (async () => {
-        if (document.fonts && document.fonts.ready) await document.fonts.ready
-        await Promise.all(Array.from(document.images || []).map(img => {
-          if (img.complete) return Promise.resolve()
-          return new Promise(resolve => {
-            img.onload = resolve
-            img.onerror = resolve
-          })
-        }))
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-        return true
-      })()
-    `, true)
-    return { ok: true, preview: true }
-  } catch (error) {
-    if (!previewWindow.isDestroyed()) previewWindow.close()
-    throw new Error('فشل فتح معاينة المستند: ' + (error instanceof Error ? error.message : String(error)))
+  // Store a self-contained HTML document and ask Windows to open it with the
+  // user's default browser, so preview/print controls run outside Electron.
+  const previewDirectory = path.join(app.getPath('temp'), 'alarabisystem-print-previews')
+  await fs.mkdir(previewDirectory, { recursive: true })
+  const previewPath = path.join(previewDirectory, `alarabi-${crypto.randomUUID()}.html`)
+  await fs.writeFile(previewPath, html, 'utf8')
+  const openError = await shell.openPath(previewPath)
+  if (openError) {
+    await fs.unlink(previewPath).catch(() => {})
+    throw new Error('تعذر فتح معاينة المستند في المتصفح: ' + openError)
   }
+  return { ok: true, external: true }
 }
 
 ipcMain.handle('invoice:print-html', createPrintPreview)
 // Keep the earlier channel available so older renderer/preload bundles still
 // open the same safe preview instead of failing with "No handler registered".
 ipcMain.handle('invoice:print', createPrintPreview)
+
+ipcMain.handle('external:open-whatsapp', async (event, target) => {
+  requireAuthenticated(event)
+  let url
+  try { url = new URL(target) } catch { throw new Error('رابط واتساب غير صالح.') }
+  if (url.protocol !== 'https:' || !['wa.me', 'web.whatsapp.com'].includes(url.hostname)) {
+    throw new Error('يمكن فتح روابط WhatsApp الرسمية فقط.')
+  }
+  await shell.openExternal(url.toString())
+  return { ok: true }
+})
 
 ipcMain.handle('invoice:print-preview', (event) => {
   requirePreview(event)

@@ -241,6 +241,11 @@ function InventoryApp({ user }: { user: AppUser }) {
   const [productModal, setProductModal] = useState<Product | null | 'new'>(null)
   const [quoteModal, setQuoteModal] = useState(false)
   const [notice, setNotice] = useState('')
+  useEffect(() => {
+    if (!notice) return
+    const timeout = window.setTimeout(() => setNotice(''), 4000)
+    return () => window.clearTimeout(timeout)
+  }, [notice])
   const [customer, setCustomer] = useState('')
   const [quoteRows, setQuoteRows] = useState<QuoteItem[]>([])
   const [draft, setDraft] = useState({
@@ -1042,7 +1047,7 @@ function InventoryApp({ user }: { user: AppUser }) {
   const printDocument = (html: string, documentName: string) => {
     if (isDesktopApp() && window.alarabiDesktop?.printHtml) {
       void window.alarabiDesktop.printHtml(html)
-        .then(() => setNotice('تم فتح معاينة ' + documentName + ' — تقدر تحفظها PDF من زر الحفظ داخل النافذة'))
+        .then(() => setNotice('تم فتح معاينة ' + documentName + ' في المتصفح الخارجي'))
         .catch(error => setNotice('تعذرت طباعة ' + documentName + ': ' + String(error)))
       return
     }
@@ -1197,7 +1202,13 @@ function InventoryApp({ user }: { user: AppUser }) {
 
   const shareDocumentOnWhatsApp = (kind: 'فاتورة بيع' | 'عرض سعر', number: string, customerName: string, date: string, total: number, balance?: number) => {
     const text = [`${COMPANY}`, kind, `رقم المستند: ${number}`, `العميل: ${customerName}`, `التاريخ: ${date}`, `الإجمالي: ${money(total)}`, ...(balance === undefined ? [] : [`المتبقي: ${money(balance)}`]), 'يمكن طباعة المستند أو حفظه PDF من البرنامج.'].join('\n')
-    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener,noreferrer')
+    const url = 'https://wa.me/?text=' + encodeURIComponent(text)
+    if (isDesktopApp() && window.alarabiDesktop?.openWhatsApp) {
+      void window.alarabiDesktop.openWhatsApp(url).catch(error => setNotice('تعذر فتح واتساب: ' + String(error)))
+      return
+    }
+    const opened = window.open(url, '_blank', 'noopener,noreferrer')
+    if (!opened) setNotice('اسمح بالنوافذ المنبثقة لفتح واتساب')
   }
 
   return (
@@ -1261,7 +1272,7 @@ function InventoryApp({ user }: { user: AppUser }) {
         }}>تسجيل الخروج</button>
         <div className="sidebar-foot">
           <span className="status-dot" /> إدارة المخزون
-          <small>v1.1.5</small>
+          <small>v1.1.6</small>
         </div>
       </aside>
 
@@ -1356,8 +1367,8 @@ function InventoryApp({ user }: { user: AppUser }) {
           </div>
         )}
 
-        {notice && (
-          <button className="notice" onClick={() => setNotice('')}>
+        {notice && !productModal && !invoiceModal && (
+          <button className="notice-toast" role="status" onClick={() => setNotice('')}>
             <Check size={16} />
             {notice}
             <X size={15} />
@@ -1813,7 +1824,7 @@ function InventoryApp({ user }: { user: AppUser }) {
 
         {tab === 'reports' && (
           <section className="reports-page" dir="rtl">
-            <div className="panel"><div className="panel-head"><div><h3>مركز التقارير</h3><p>تقارير المبيعات والخزنة والمخزون — كحلي ورمادي ولمسات حمراء.</p></div><span className="muted">AL / DATA</span></div>
+            <div className="panel"><div className="panel-head"><div><h3>مركز التقارير</h3><p>راجع المبيعات وحركة الخزنة والمخزون خلال الفترة التي تحددها.</p></div><span className="muted">AL / DATA</span></div>
               <div className="report-filters">
                 <label>من تاريخ<input type="date" value={reportFrom} onChange={e=>setReportFrom(e.target.value)} /></label>
                 <label>إلى تاريخ<input type="date" value={reportTo} onChange={e=>setReportTo(e.target.value)} /></label>
@@ -2015,8 +2026,6 @@ function InventoryApp({ user }: { user: AppUser }) {
                 </h2>
                 <p>املأ بيانات الصنف الأساسية</p>
               </div>
-              {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
-
               <button
                 className="icon-btn"
                 onClick={() => setProductModal(null)}
@@ -2024,6 +2033,7 @@ function InventoryApp({ user }: { user: AppUser }) {
                 <X />
               </button>
             </div>
+            {notice && <div role="alert" style={{ margin: '10px 0', padding: '10px 12px', border: '1px solid #e8c7a0', borderRadius: 8, background: '#fff8ed', color: '#7a4b16', fontSize: 13 }}>{notice}</div>}
 
             <div className="form-grid">
               <Field

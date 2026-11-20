@@ -1,7 +1,7 @@
 {
   "name": "alarabi-inventory",
   "private": true,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "نظام العربي لإدارة المخزون والمبيعات والفواتير",
   "author": "AlArabi Earthing Systems",
   "type": "module",

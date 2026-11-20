@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('alarabiDesktop', Object.freeze({
   printHtml: (html) => ipcRenderer.invoke('invoice:print-html', html),
   printPreview: () => ipcRenderer.invoke('invoice:print-preview'),
   savePreviewPdf: () => ipcRenderer.invoke('invoice:save-preview-pdf'),
+  openWhatsApp: (url) => ipcRenderer.invoke('external:open-whatsapp', url),
   onQuickSearchShortcut: (callback) => {
     if (typeof callback !== 'function') return () => {}
     const listener = () => callback()
