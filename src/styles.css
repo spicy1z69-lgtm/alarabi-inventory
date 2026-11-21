@@ -2373,3 +2373,35 @@ kbd { border-color:#654126 !important; background:#2d2119 !important; color:#ffc
 @media (max-width:700px) { .cash-reconcile { align-items:stretch; flex-direction:column; } .cash-reconcile .field { min-width:0; } .sales-bars { gap:4px; } .sales-bar-item strong { font-size:8px; } }
 .quote-date-filter input { min-height:38px; padding:8px 10px; border:1px solid #3b424b; border-radius:8px; background:#151a20; color:#f1ede5; }
 @media (max-width:700px) { .quote-totals-strip { align-items:flex-start; flex-direction:column; } .quote-date-filter { min-width:100%; } }
+
+/* Subtle motion for a calmer, more responsive operations dashboard. */
+.main > section,
+.main > .dashboard-insights,
+.main > .stats-grid {
+  animation: section-enter .36s cubic-bezier(.2,.75,.25,1) both;
+}
+.main > :nth-child(2) { animation-delay: .035s; }
+.main > :nth-child(3) { animation-delay: .07s; }
+.main > :nth-child(4) { animation-delay: .105s; }
+.main > :nth-child(5) { animation-delay: .14s; }
+@keyframes section-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.welcome-art { animation: welcome-float 4.5s ease-in-out infinite; }
+@keyframes welcome-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.sales-bar-track span { transform-origin: bottom; animation: bar-rise .6s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes bar-rise { from { transform: scaleY(.08); opacity:.4; } to { transform:scaleY(1); opacity:1; } }
+.goal-track { height:10px; overflow:hidden; border-radius:99px; background:#292c30; }
+.goal-track span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#dd5926,#ffb15e); transition:width .55s cubic-bezier(.2,.75,.25,1); }
+.goal-meta { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-top:10px; color:#c6c0b7; font-size:12px; }
+.goal-success { margin:10px 0 0; color:#a5d6a7; }
+.dashboard-goal-panel .panel-head > b { color:#ffbf77; font-size:20px; }
+.bulk-pricing-panel .table-wrap { margin:14px 0; }
+.invoice-status-filter { min-width:150px; }
+.template-chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+@media (prefers-reduced-motion: reduce) {
+  .main > section, .main > .dashboard-insights, .main > .stats-grid,
+  .welcome-art, .sales-bar-track span { animation:none !important; }
+  .goal-track span { transition:none !important; }
+}

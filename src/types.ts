@@ -9,6 +9,7 @@ export interface Product {
   costPrice?: number
   minStock: number
   targetStock?: number
+  location?: string
 }
 
 export interface QuoteItem {
